@@ -16,8 +16,14 @@ class WalletFilterTests(APITestCase):
         self.client = APIClient()
         self.user1 = User.objects.create_user(username='user1', password='pass123', email='user1@example.com')
         self.user2 = User.objects.create_user(username='user2', password='pass123', email='user2@example.com')
-        self.wallet1 = Wallet.objects.create(user=self.user1, balance=Decimal('100.00'))
-        self.wallet2 = Wallet.objects.create(user=self.user2, balance=Decimal('500.00'))
+        
+        self.wallet1 = self.user1.wallet
+        self.wallet2 = self.user2.wallet
+        self.wallet1.balance = Decimal('100.00')
+        self.wallet2.balance = Decimal('500.00')
+        self.wallet1.save()
+        self.wallet2.save()
+
         self.url = reverse('wallet:wallet-list')
         self.admin = User.objects.create_superuser(username='admin', password='admin123', email='admin@example.com')
         self.client.force_authenticate(user=self.admin)
@@ -65,8 +71,12 @@ class TransactionFilterTests(APITestCase):
         self.client = APIClient()
         self.user1 = User.objects.create_user(username='user1', password='pass123', email='user1@example.com')
         self.user2 = User.objects.create_user(username='user2', password='pass123', email='user2@example.com')
-        self.wallet1 = Wallet.objects.create(user=self.user1, balance=Decimal('1000.00'))
-        self.wallet2 = Wallet.objects.create(user=self.user2, balance=Decimal('500.00'))
+        self.wallet1 = self.user1.wallet
+        self.wallet2 = self.user2.wallet
+        self.wallet1.balance = Decimal('1000.00')
+        self.wallet2.balance = Decimal('500.00')
+        self.wallet1.save()
+        self.wallet2.save()
         
         self.transaction1 = Transaction.objects.create(
             user=self.user1,

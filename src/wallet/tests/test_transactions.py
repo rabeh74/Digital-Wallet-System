@@ -22,7 +22,7 @@ class TransactionViewSetTests(APITestCase):
             password='testpass123',
             email='testuser@example.com'
         )
-        self.wallet = Wallet.objects.create(user=self.user)
+        self.wallet = self.user.wallet
         self.deposit = Transaction.objects.create(
             user=self.user,
             amount=Decimal('50.00'),
@@ -68,7 +68,11 @@ class PaysendWebhookTests(APITestCase):
             password='testpass123',
             phone_number='96170123456'
         )
-        self.wallet = Wallet.objects.create(user=self.user, balance=Decimal('100.00'))
+        
+        self.wallet = self.user.wallet
+        self.wallet.balance = Decimal('100.00')
+        self.wallet.save()
+
         self.webhook_url = reverse('wallet:paysend-webhook')
         settings.PAYSEND_WEBHOOK_SECRET = 'test_webhook_secret'
 
@@ -153,7 +157,11 @@ class CashOutTests(APITestCase):
             email='testuser@example.com',
             password='testpass123'
         )
-        self.wallet = Wallet.objects.create(user=self.user, balance=Decimal('1000.00'))
+
+        self.wallet = self.user.wallet
+        self.wallet.balance = Decimal('1000.00')
+        self.wallet.save()
+
         self.url_request = reverse('wallet:wallet-cash-out-request')
         self.url_verify = reverse('wallet:cash-out-verify')
 

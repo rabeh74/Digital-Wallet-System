@@ -19,13 +19,6 @@ class WalletAPITests(APITestCase):
         self.client.force_authenticate(user=self.user)
         self.wallet_url = reverse('wallet:wallet-list')
 
-    def test_create_wallet(self):
-        """Test creating a wallet"""
-        response = self.client.post(self.wallet_url)
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data['user']['id'], self.user.id)
-        self.assertEqual(Decimal(response.data['balance']), Decimal('0.00'))
-
     def test_create_existing_wallet(self):
         """Test cannot create wallet if already exists"""
         self.client.post(self.wallet_url)
@@ -61,23 +54,21 @@ class WalletAPITests(APITestCase):
             password='adminpass123',
             username='admin'
         )
-        user1 = User.objects.create_user(
+        User.objects.create_user(
             email='user1@example.com',
             password='user1pass123',
             username='user1'
         )
-        user2 = User.objects.create_user(
+        User.objects.create_user(
             email='user2@example.com',
             password='user2pass123',
             username='user2'
         )
-        Wallet.objects.create(user=user1)
-        Wallet.objects.create(user=user2)
 
         self.client.force_authenticate(user=admin_user)
         response = self.client.get(self.wallet_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data), 3)
 
 
 class WalletTransferTests(APITestCase):
@@ -92,8 +83,14 @@ class WalletTransferTests(APITestCase):
             password='testpass123',
             email='recipient@example.com'
         )
-        self.sender_wallet = Wallet.objects.create(user=self.sender, balance=Decimal('100.00'))
-        self.recipient_wallet = Wallet.objects.create(user=self.recipient, balance=Decimal('0.00'))
+
+        self.sender_wallet = self.sender.wallet
+        self.recipient_wallet = self.recipient.wallet
+        self.sender_wallet.balance = Decimal('100.00')
+        self.recipient_wallet.balance = Decimal('0.00')
+        self.sender_wallet.save()
+        self.recipient_wallet.save()
+
         self.transfer_url = reverse('wallet:wallet-transfer')
         self.transaction_action_url = reverse('wallet:transaction-process-action')
         self.client.force_authenticate(user=self.sender)
