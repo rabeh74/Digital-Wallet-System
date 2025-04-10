@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Deposit Confirmation</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+    <table align="center" border="0" cellpadding="0" cellspacing="0" width="600" style="border-collapse: collapse;">
+        <!-- Header -->
+        <tr>
+            <td bgcolor="#4CAF50" style="padding: 20px; text-align: center; color: white;">
+                <h1 style="margin: 0; font-size: 24px;">Deposit Confirmation</h1>
+            </td>
+        </tr>
+        <!-- Body -->
+        <tr>
+            <td bgcolor="#ffffff" style="padding: 30px;">
+                <p style="font-size: 16px; color: #333;">Hi there,</p>
+                <p style="font-size: 16px; color: #333;">
+                    Good news! A deposit of <strong>{{ amount }}</strong> has been successfully added to your wallet.
+                </p>
+                <h2 style="font-size: 18px; color: #4CAF50; margin-top: 20px;">Details</h2>
+                <table style="font-size: 16px; color: #333; width: 100%;">
+                    <tr>
+                        <td style="padding: 5px 0;">Amount:</td>
+                        <td style="padding: 5px 0;"><strong>{{ amount }}</strong></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px 0;">Reference:</td>
+                        <td style="padding: 5px 0;"><strong>{{ reference }}</strong></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px 0;">Date:</td>
+                        <td style="padding: 5px 0;"><strong>{{ created_at|date:"Y-m-d H:i:s" }}</strong></td>
+                    </tr>
+                </table>
+                <p style="font-size: 16px; color: #333; margin-top: 20px;">Thanks for using our service!</p>
+            </td>
+        </tr>
+        <!-- Footer -->
+        <tr>
+            <td bgcolor="#f4f4f4" style="padding: 20px; text-align: center; font-size: 14px; color: #777;">
+                <p style="margin: 0;">The Wallet Team</p>
+                <p style="margin: 5px 0;">Need help? Contact us at <a href="mailto:support@walletapp.com" style="color: #4CAF50;">support@walletapp.com</a></p>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

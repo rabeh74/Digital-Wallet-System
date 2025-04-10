@@ -12,6 +12,7 @@ user_params = {
     'email':'test@email.com',
     'password':'testpass',
     'phone_number':'1234567890',
+    'username' : "testuser"
 }
 
 class UserModelTests(TestCase):

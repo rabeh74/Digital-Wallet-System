@@ -23,8 +23,10 @@ class UserPublicAPITests(APITestCase):
     def setUp(self):
         self.user_params = {
             'email': 'test@email.com',
+            'username' : "testuser",
             'password1':'test54*&^%&pass',
             'password2':'test54*&^%&pass',
+
         }
     
     def test_create_user(self):
@@ -44,6 +46,7 @@ class UserAPITests(APITestCase):
             'email': 'test@email.com',
             'password':'testpass',
             'phone_number':'1234567890',
+            'username':'testuser'
         }
         self.user = create_user(**self.user_params)
         self.login_url = reverse('user:token_obtain_pair')
@@ -128,10 +131,10 @@ class UserAPITests(APITestCase):
         """
         Ensure an admin can list all users.
         """
-        admin_user = create_superuser(email='test1@example.com', password='testpass123')
-        create_user(email='test2@example.com', password='testpass123')
-        create_user(email='test3@example.com', password='testpass123')
-        create_user(email='test4@example.com', password='testpass123')
+        admin_user = create_superuser(email='test1@example.com', password='testpass123' , username='admin')
+        create_user(email='test2@example.com', password='testpass123' , username='user2')
+        create_user(email='test3@example.com', password='testpass123' , username='user3')
+        create_user(email='test4@example.com', password='testpass123' , username='user4')
 
         self.client.force_authenticate(user=admin_user)
         url = reverse('user:list_users')
@@ -143,10 +146,9 @@ class UserAPITests(APITestCase):
         """
         Ensure a user cannot update another user's details.
         """
-        another_user = create_user(email='test5@example.com', password='testpass123')
+        another_user = create_user(username='test5', email='test5@example.com', password='testpass123')
         self.client.force_authenticate(user=another_user)
         response = self.client.put(self.user_update_url, {"email": "another_user@email.com"})
-        print(response.data)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     

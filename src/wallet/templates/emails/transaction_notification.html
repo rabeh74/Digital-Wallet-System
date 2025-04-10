@@ -1,0 +1,96 @@
+<!-- wallet/templates/emails/transaction_notification.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transaction Notification</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            border-radius: 8px 8px 0 0;
+        }
+        .content {
+            padding: 20px;
+        }
+        .details {
+            border: 1px solid #ddd;
+            padding: 15px;
+            background-color: #fafafa;
+            border-radius: 4px;
+        }
+        .details p {
+            margin: 10px 0;
+        }
+        .footer {
+            text-align: center;
+            padding: 10px;
+            font-size: 12px;
+            color: #777;
+        }
+        .status-pending { color: #FFA500; }
+        .status-accepted { color: #4CAF50; }
+        .status-rejected { color: #F44336; }
+        .status-completed { color: #2196F3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Transaction Notification</h2>
+        </div>
+        <div class="content">
+            <p>Dear {{ username }},</p>
+            {% if action == 'sent' %}
+                <p>You have successfully sent a transfer:</p>
+            {% elif action == 'received' %}
+                <p>You have received a transfer (pending your approval):</p>
+            {% elif action == 'withdrawal' %}
+                <p>You have requested a withdrawal:</p>
+            {% elif action == 'deposit' %}
+                <p>You have received a deposit:</p>
+            {% endif %}
+            
+            <div class="details">
+                <p><strong>Amount:</strong> {{ amount }} USD</p>
+                {% if recipient %}
+                    <p><strong>Recipient:</strong> {{ recipient }}</p>
+                {% endif %}
+                {% if sender %}
+                    <p><strong>Sender:</strong> {{ sender }}</p>
+                {% endif %}
+                <p><strong>Reference:</strong> {{ reference }}</p>
+                <p><strong>Date:</strong> {{ date }}</p>
+                <p><strong>Status:</strong> <span class="status-{{ status|lower }}">{{ status }}</span></p>
+            </div>
+            
+            {% if action == 'received' and status == 'PENDING' %}
+                <p>Please log in to your account to accept or reject this transaction.</p>
+            {% elif action == 'withdrawal' and status == 'PENDING' %}
+                <p>Use the withdrawal code at the ATM to complete the process.</p>
+            {% endif %}
+        </div>
+        <div class="footer">
+            <p>Thank you for using our service!</p>
+            <p>&copy; {{ current_year }} Purple</p>
+        </div>
+    </div>
+</body>
+</html>

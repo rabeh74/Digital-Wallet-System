@@ -39,6 +39,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'email',
+            'username',
             'password1',
             'password2',
             'first_name',
@@ -48,7 +49,8 @@ class UserSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             'email': {'required': True},
-            'date_of_birth': {'required': False}
+            'date_of_birth': {'required': False},
+            'username': {'required': True}
         }
 
     def validate_email(self, value):

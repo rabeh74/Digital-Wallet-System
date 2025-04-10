@@ -42,9 +42,10 @@ INSTALLED_APPS = [
     #3rd party
     'rest_framework',
     'rest_framework_simplejwt',
-    # 'drf_spectacular',
+    'drf_spectacular',
     'django_celery_beat',
     'django_celery_results',
+    'django_filters',
 
     #apps
     'user',
@@ -69,7 +70,7 @@ ROOT_URLCONF = 'digital_wallet.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / "templates"],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -174,11 +175,11 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-# REST_FRAMEWORK['DEFAULT_SCHEMA_CLASS'] = 'drf_spectacular.openapi.AutoSchema'
+REST_FRAMEWORK['DEFAULT_SCHEMA_CLASS'] = 'drf_spectacular.openapi.AutoSchema'
 
-# SPECTACULAR_SETTINGS = {
-# 'COMPONENT_SPLIT_REQUEST':True,
-# }
+SPECTACULAR_SETTINGS = {
+'COMPONENT_SPLIT_REQUEST':True,
+}
 
 # Email Configuration
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # For testing
@@ -198,4 +199,8 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
+
+# PaySend Webhook Configuration
+PAYSEND_WEBHOOK_SECRET = os.getenv('PAYSEND_WEBHOOK_SECRET')
+
 

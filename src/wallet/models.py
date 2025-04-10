@@ -1,12 +1,13 @@
 from django.db import models
 from django.contrib.auth import get_user_model
-from django.core.validators import MinValueValidator
+from decimal import Decimal
+from django.core.exceptions import ValidationError
 
 User = get_user_model()
 
 class Wallet(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='wallet')
-    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, validators=[MinValueValidator(0)])
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -15,31 +16,39 @@ class Wallet(models.Model):
         return f"{self.user.username}'s Wallet (Balance: {self.balance})"
 
 class Transaction(models.Model):
-    TRANSACTION_TYPE = (
-        ('DEP', 'Deposit'),
-        ('WTH', 'Withdrawal'),
-        ('TRF', 'Transfer')
-    )
+    class TransactionTypes(models.TextChoices):
+        DEPOSIT = 'DEP', 'Deposit'
+        WITHDRAWAL = 'WTH', 'Withdrawal'
+        CREDIT = 'CREDIT', 'Credit'
+        DEBIT = 'DEBIT', 'Debit'
     
-    FUNDING_SOURCE = (
-        ('BANK', 'Bank Transfer'),
-        ('CARD', 'Card Payment'),
-        ('CASH', 'Cash Deposit'),
-        ('MOBILE', 'Mobile Money'),
-        ('PEER', 'Peer Transfer'),
-        ('PROMO', 'Promotional Credit'),
-        ('REFUND', 'Refund')
-    )
-    
-    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')
-    amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0.01)])
-    transaction_type = models.CharField(max_length=3, choices=TRANSACTION_TYPE)
-    funding_source = models.CharField(max_length=10, choices=FUNDING_SOURCE, null=True, blank=True)
-    reference = models.CharField(max_length=100)
-    recipient = models.ForeignKey(Wallet, on_delete=models.SET_NULL, null=True, blank=True, related_name='received_transactions')
-    status = models.CharField(max_length=20, default='PENDING')
+    class FundingSource(models.TextChoices):
+        PAYSEND = 'PAYSEND', 'Paysend'
+        BLF_ATM = 'BLF_ATM', 'Banque Libano-Française ATM'
+        INTERNAL = 'INTERNAL', 'Internal'
+
+    class Status(models.TextChoices):
+        PENDING = 'PENDING', 'Pending'
+        ACCEPTED = 'ACCEPTED', 'Accepted'
+        REJECTED = 'REJECTED', 'Rejected'
+        COMPLETED = 'COMPLETED', 'Completed'
+        FAILED = 'FAILED', 'Failed'
+        EXPIRED = 'EXPIRED', 'Expired'
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='transactions' , null=True, blank=True , default=None)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    transaction_type = models.CharField(max_length=10, choices=TransactionTypes.choices)
+    funding_source = models.CharField(max_length=10, choices=FundingSource.choices, null=True, blank=True)
+    reference = models.CharField(max_length=100 )
+    related_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='related_transactions' , null=True, blank=True , default=None)
+    status = models.CharField(max_length=20, choices=Status.choices, default='PENDING')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    expiry_time = models.DateTimeField(null=True, blank=True)
     
     def __str__(self):
-        return f"{self.get_transaction_type_display()} of {self.amount} for {self.wallet.user.username}"
+        return f"{self.get_transaction_type_display()} of {self.amount} for {self.user.username}"
+    
+    def get_transaction_type_display(self):
+        return self.TransactionTypes(self.transaction_type)
+        
