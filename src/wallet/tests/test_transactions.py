@@ -147,7 +147,6 @@ class PaysendWebhookTests(APITestCase):
             content_type='application/json',
             HTTP_X_PAYSEND_SIGNATURE=signature
         )
-        print(response.data)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['status'], 'processed')
         self.wallet.refresh_from_db()
