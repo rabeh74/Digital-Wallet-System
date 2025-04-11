@@ -1,4 +1,3 @@
-# wallet/notifications.py
 from .tasks import send_transaction_notification as send_notification_task
 
 class NotificationService:

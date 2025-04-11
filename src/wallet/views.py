@@ -1,4 +1,3 @@
-# wallet/views.py
 """
 Views for the wallet app, handling wallet management, transactions, transfers,
 cash-outs, and webhook integrations using Django REST Framework.
@@ -36,6 +35,7 @@ from .permissions import IsOwner
 from .service import WalletServiceFactory
 from .filters import WalletFilter, TransactionFilter
 from .pagination import TransactionPagination
+from .utils import IdempotencyMixin, IdempotencyChecker
 
 User = get_user_model()
 CACHE_TIMEOUT = settings.CACHE_TIMEOUT
@@ -544,30 +544,17 @@ class TransactionViewSet(BaseServiceViewSet):
         return Response(data)
 
 
+
 class BaseWebhookView(GenericAPIView):
-    """Base view for webhook endpoints with wallet service injection."""
     throttle_scope = 'wallet'
 
     def __init__(self, wallet_service=None, *args, **kwargs):
-        """
-        Initialize the webhook view with a wallet service.
-
-        Args:
-            wallet_service: Optional WalletService instance (for testing/mocking).
-            *args: Variable length argument list.
-            **kwargs: Arbitrary keyword arguments.
-        """
         super().__init__(*args, **kwargs)
         factory = WalletServiceFactory()
         self.wallet_service = wallet_service or factory.create_wallet_service()
 
-
 @method_decorator(csrf_exempt, name='dispatch')
-class PaysendWebhookView(BaseWebhookView):
-    """
-    View to handle Paysend webhook events for deposit processing.
-    """
-
+class PaysendWebhookView(BaseWebhookView, IdempotencyMixin):
     permission_classes = [AllowAny]
     serializer_class = PaysendWebhookSerializer
 
@@ -581,98 +568,47 @@ class PaysendWebhookView(BaseWebhookView):
         Returns:
             Response: Processing status or error details.
         """
-        if request.META.get('REMOTE_ADDR') not in settings.IP_WHITELIST:
-            return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
-        if not self._verify_signature(request.body, request.headers.get('X-Paysend-Signature', '')):
-            return Response({'detail': 'Invalid signature'}, status=status.HTTP_401_UNAUTHORIZED)
+        def process_paysend_webhook(request, *args, **kwargs):
+            if request.META.get('REMOTE_ADDR') not in settings.IP_WHITELIST:
+                return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+            if not self._verify_signature(request.body, request.headers.get('X-Paysend-Signature', '')):
+                return Response({'detail': 'Invalid signature'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        payload = self._parse_payload(request.body)
-        if payload.get('status') != 'COMPLETED':
-            return Response({'status': 'ignored'}, status=status.HTTP_200_OK)
+            payload = self._parse_payload(request.body)
+            if payload.get('status') != 'COMPLETED':
+                return Response({'status': 'ignored'}, status=status.HTTP_200_OK)
 
-        wallet, amount, reference = self._extract_transaction_data(payload)
+            wallet, amount, reference = self._extract_transaction_data(payload)
+            transaction = self._process_deposit(wallet, amount, reference)
+            return Response(
+                {'status': 'processed', 'transaction_id': transaction.id},
+                status=status.HTTP_200_OK
+            )
 
-        # idempotency check
-        if Transaction.objects.filter(reference=reference).exists():
-            return Response({'status': 'already_processed'}, status=status.HTTP_200_OK)
-
-        transaction = self._process_deposit(wallet, amount, reference)
-        return Response(
-            {'status': 'processed', 'transaction_id': transaction.id},
-            status=status.HTTP_200_OK
-        )
+        return self.enforce_idempotency(request, process_paysend_webhook)
 
     def _verify_signature(self, payload, signature):
-        """
-        Verify HMAC-SHA256 signature of the webhook payload.
-
-        Args:
-            payload: Raw request body.
-            signature: Signature from request header.
-
-        Returns:
-            bool: True if signature matches, False otherwise.
-        """
         secret = settings.PAYSEND_WEBHOOK_SECRET.encode()
         expected = hmac.new(secret, msg=payload, digestmod=hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, signature)
 
     def _parse_payload(self, body):
-        """
-        Parse JSON payload from the request body.
-
-        Args:
-            body: Raw request body.
-
-        Returns:
-            dict: Parsed payload data.
-
-        Raises:
-            CustomValidationError: If parsing fails.
-        """
         try:
             return json.loads(body.decode('utf-8'))
         except (ValueError, KeyError) as e:
             raise CustomValidationError(f"Invalid payload: {str(e)}")
 
     def _extract_transaction_data(self, payload):
-        """
-        Extract wallet, amount, and reference from webhook payload.
-
-        Args:
-            payload: Parsed webhook data.
-
-        Returns:
-            tuple: (Wallet, Decimal amount, reference string).
-
-        Raises:
-            CustomValidationError: If data is invalid or wallet not found.
-        """
         try:
             phone_number = payload['recipient']['phone_number']
             amount = Decimal(payload['recipient']['amount'])
             reference = f"Paysend: {payload['transactionId']}"
             wallet = get_object_or_404(Wallet, user__phone_number=phone_number)
-            
             return wallet, amount, reference
         except (KeyError, ValueError) as e:
             raise CustomValidationError(f"Invalid transaction data: {str(e)}")
 
     def _process_deposit(self, wallet, amount, reference):
-        """
-        Process the deposit using the wallet service.
-
-        Args:
-            wallet: Wallet object to deposit into.
-            amount: Decimal amount to deposit.
-            reference: Transaction reference string.
-
-        Returns:
-            Transaction: Created transaction object.
-
-        Raises:
-            CustomValidationError: If deposit fails.
-        """
         return self.wallet_service.process(
             process_type='deposit',
             wallet=wallet,
@@ -683,11 +619,7 @@ class PaysendWebhookView(BaseWebhookView):
 
 
 @method_decorator(csrf_exempt, name='dispatch')
-class CashOutVerifyView(BaseWebhookView):
-    """
-    View to verify cash-out requests using withdrawal codes.
-    """
-
+class CashOutVerifyView(BaseWebhookView, IdempotencyMixin):
     permission_classes = [AllowAny]
     serializer_class = CashOutVerifySerializer
 
@@ -701,29 +633,32 @@ class CashOutVerifyView(BaseWebhookView):
         Returns:
             Response: Approval details or error message.
         """
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        def process_cashout_verify(request, *args, **kwargs):
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
 
-        phone_number = serializer.validated_data['phone_number']
-        withdrawal_code = serializer.validated_data['withdrawal_code']
+            phone_number = serializer.validated_data['phone_number']
+            withdrawal_code = serializer.validated_data['withdrawal_code']
 
-        try:
             if request.META.get('REMOTE_ADDR') not in settings.IP_WHITELIST:
                 return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
-            
-            transaction = self.wallet_service.verify_cash_out(phone_number, withdrawal_code)
-            return Response(
-                {
-                    'status': 'approved',
-                    'amount': str(abs(transaction.amount)),
-                    'transaction_id': transaction.id
-                },
-                status=status.HTTP_200_OK
-            )
-        except CustomValidationError as e:
-            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Transaction.DoesNotExist:
-            return Response(
-                {'detail': 'Invalid withdrawal code or phone number'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+
+            try:
+                transaction = self.wallet_service.verify_cash_out(phone_number, withdrawal_code)
+                return Response(
+                    {
+                        'status': 'approved',
+                        'amount': str(abs(transaction.amount)),
+                        'transaction_id': transaction.id
+                    },
+                    status=status.HTTP_200_OK
+                )
+            except CustomValidationError as e:
+                return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            except Transaction.DoesNotExist:
+                return Response(
+                    {'detail': 'Invalid withdrawal code or phone number'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        return self.enforce_idempotency(request, process_cashout_verify)

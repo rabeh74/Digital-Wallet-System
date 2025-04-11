@@ -1,4 +1,3 @@
-# wallet/tasks.py
 from celery import shared_task
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
@@ -30,7 +29,6 @@ def send_transaction_notification(user_email, payload ):
     except Exception as e:
         print(f"Failed to send email: {str(e)}")
 
-# wallet/tasks.py
 @shared_task
 def expire_old_transactions():
     """

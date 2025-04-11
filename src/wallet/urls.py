@@ -1,4 +1,3 @@
-# wallet/urls.py
 from rest_framework.routers import DefaultRouter
 from .views import WalletViewSet , TransactionViewSet , PaysendWebhookView , CashOutVerifyView
 from django.urls import include , path

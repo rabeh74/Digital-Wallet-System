@@ -1,4 +1,3 @@
-# wallet/service.py
 """
 Service layer for wallet and transaction operations, implementing repository,
 strategy, and command patterns for modularity and consistency.
@@ -624,18 +623,7 @@ class WalletService:
         """
         with db_transaction.atomic():
             transaction = self.transaction_repository.get_by_withdrawal_code(phone_number, withdrawal_code)
-            if not transaction:
-                raise InvalidTransactionError("Invalid withdrawal code or phone number")
-
-            if timezone.now() > transaction.expiry_time:
-                self.transaction_repository.update_status(transaction, Transaction.Status.EXPIRED)
-                raise ExpiredTransactionError("Withdrawal code has expired")
-
             wallet = transaction.wallet
-            if wallet.balance < abs(transaction.amount):
-                self.transaction_repository.update_status(transaction, Transaction.Status.FAILED)
-                raise InsufficientFundsError("Insufficient funds")
-
             self.wallet_repository.update_balance(wallet, -transaction.amount)
             self.transaction_repository.update_status(transaction, Transaction.Status.COMPLETED)
             self.notification_service.send_transaction_notification(wallet.user.email, transaction, 'cash_out_verified')

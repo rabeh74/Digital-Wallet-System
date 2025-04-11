@@ -1,4 +1,3 @@
-# wallet/filters.py
 from django_filters import rest_framework as filters
 from django_filters import OrderingFilter
 from django.db.models import Q

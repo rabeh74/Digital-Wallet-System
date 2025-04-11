@@ -1,4 +1,3 @@
-# wallet/apps.py
 from django.apps import AppConfig
 
 
@@ -8,4 +7,4 @@ class WalletConfig(AppConfig):
 
     def ready(self):
         # Import signals to register them when the app is ready
-        import wallet.signals  # noqa
+        import wallet.signals 

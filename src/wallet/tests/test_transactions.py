@@ -1,4 +1,5 @@
 # wallet/tests/test_transactions.py
+import uuid
 from django.urls import reverse
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
@@ -145,7 +146,8 @@ class PaysendWebhookTests(APITestCase):
             self.webhook_url,
             data=payload_bytes,
             content_type='application/json',
-            HTTP_X_PAYSEND_SIGNATURE=signature
+            HTTP_X_PAYSEND_SIGNATURE=signature,
+            HTTP_Idempotency_Key = str(uuid.uuid4())
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['status'], 'processed')
@@ -165,7 +167,8 @@ class PaysendWebhookTests(APITestCase):
             self.webhook_url,
             data=payload_bytes,
             content_type='application/json',
-            HTTP_X_PAYSEND_SIGNATURE='invalid_signature'
+            HTTP_X_PAYSEND_SIGNATURE='invalid_signature',
+            HTTP_Idempotency_Key = str(uuid.uuid4())
         )
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertEqual(response.data['detail'], 'Invalid signature')
@@ -180,20 +183,23 @@ class PaysendWebhookTests(APITestCase):
         payload_bytes = json.dumps(payload).encode('utf-8')
         signature = self.get_signature(payload_bytes)
 
+        cur_uuid = str(uuid.uuid4())
         self.client.post(
             self.webhook_url,
             data=payload_bytes,
             content_type='application/json',
-            HTTP_X_PAYSEND_SIGNATURE=signature
+            HTTP_X_PAYSEND_SIGNATURE=signature,
+            HTTP_Idempotency_Key = cur_uuid
         )
         response = self.client.post(
             self.webhook_url,
             data=payload_bytes,
             content_type='application/json',
-            HTTP_X_PAYSEND_SIGNATURE=signature
+            HTTP_X_PAYSEND_SIGNATURE=signature,
+            HTTP_Idempotency_Key = cur_uuid
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['status'], 'already_processed')
+        self.assertEqual(response.data['status'], 'processed')
         self.wallet.refresh_from_db()
         self.assertEqual(self.wallet.balance, Decimal('160.00'))
     
@@ -212,7 +218,8 @@ class PaysendWebhookTests(APITestCase):
             self.webhook_url,
             data=payload_bytes,
             content_type='application/json',
-            HTTP_X_PAYSEND_SIGNATURE=signature
+            HTTP_X_PAYSEND_SIGNATURE=signature,
+            HTTP_Idempotency_Key = str(uuid.uuid4())
         )
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertEqual(response.data['detail'], 'Unauthorized')
@@ -238,7 +245,7 @@ class CashOutTests(APITestCase):
     def test_cash_out_request_success(self):
         """Test successful cash-out request"""
         self.client.force_authenticate(user=self.user)
-        response = self.client.post(self.url_request, {'amount': '100.00'}, format='json')
+        response = self.client.post(self.url_request, {'amount': '100.00'}, format='json' , HTTP_Idempotency_Key = str(uuid.uuid4()))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('withdrawal_code', response.data)
         self.assertEqual(Decimal(response.data['amount']), Decimal('100.00'))
@@ -252,13 +259,14 @@ class CashOutTests(APITestCase):
     def test_cash_out_verify_success(self):
         """Test successful cash-out verification"""
         self.client.force_authenticate(user=self.user)
-        response = self.client.post(self.url_request, {'amount': '100.00'}, format='json')
+        response = self.client.post(self.url_request, {'amount': '100.00'}, format='json' , HTTP_Idempotency_Key = str(uuid.uuid4()))
+        
         withdrawal_code = response.data['withdrawal_code']
 
         response = self.client.post(self.url_verify, {
             'phone_number': '+96112345678',
             'withdrawal_code': withdrawal_code
-        }, format='json')
+        }, format='json' , HTTP_Idempotency_Key = str(uuid.uuid4()))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['status'], 'approved')
         self.wallet.refresh_from_db()
@@ -267,7 +275,7 @@ class CashOutTests(APITestCase):
     def test_cash_out_verify_expired_code(self):
         """Test verification with expired code"""
         self.client.force_authenticate(user=self.user)
-        response = self.client.post(self.url_request, {'amount': '100.00'}, format='json')
+        response = self.client.post(self.url_request, {'amount': '100.00'}, format='json' , HTTP_Idempotency_Key = str(uuid.uuid4()))
         withdrawal_code = response.data['withdrawal_code']
 
         transaction = Transaction.objects.get(wallet=self.user.wallet)
@@ -277,7 +285,7 @@ class CashOutTests(APITestCase):
         response = self.client.post(self.url_verify, {
             'phone_number': '+96112345678',
             'withdrawal_code': withdrawal_code
-        }, format='json')
+        }, format='json' , HTTP_Idempotency_Key = str(uuid.uuid4()))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data['detail'], 'Withdrawal code has expired')
 
@@ -287,7 +295,7 @@ class CashOutTests(APITestCase):
         self.user.save()
 
         self.client.force_authenticate(user=self.user)
-        response = self.client.post(self.url_request, {'amount': '1000.00'}, format='json')
+        response = self.client.post(self.url_request, {'amount': '1000.00'}, format='json' , HTTP_Idempotency_Key = str(uuid.uuid4()))
         withdrawal_code = response.data['withdrawal_code']
 
         self.wallet.balance = Decimal('500.00')
@@ -296,6 +304,6 @@ class CashOutTests(APITestCase):
         response = self.client.post(self.url_verify, {
             'phone_number': '+96112345678',
             'withdrawal_code': withdrawal_code
-        }, format='json')
+        }, format='json' , HTTP_Idempotency_Key = str(uuid.uuid4()))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data['detail'], 'Insufficient funds')
