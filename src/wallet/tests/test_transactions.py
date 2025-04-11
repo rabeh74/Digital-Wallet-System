@@ -46,8 +46,8 @@ class TransactionViewSetTests(APITestCase):
         """Test listing transactions"""
         response = self.client.get(self.transactions_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
-        deposit_data = next(t for t in response.data if t['id'] == self.deposit.id)
+        self.assertEqual(len(response.data['results']), 2)
+        deposit_data = next(t for t in response.data['results'] if t['id'] == self.deposit.id)
         self.assertEqual(deposit_data['transaction_type'], Transaction.TransactionTypes.DEPOSIT)
         self.assertEqual(Decimal(deposit_data['amount']), Decimal('50.00'))
 
@@ -68,7 +68,7 @@ class PaysendWebhookTests(APITestCase):
             password='testpass123',
             phone_number='96170123456'
         )
-        
+
         self.wallet = self.user.wallet
         self.wallet.balance = Decimal('100.00')
         self.wallet.save()

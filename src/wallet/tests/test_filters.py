@@ -105,38 +105,38 @@ class TransactionFilterTests(APITestCase):
     def test_filter_by_sender_user(self):
         response = self.client.get(self.url, {'user': 'user1'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['reference'], 'DEBIT-001')
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['reference'], 'DEBIT-001')
 
     def test_filter_by_recipient_user(self):
         response = self.client.get(self.url, {'user': 'user2'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['reference'], 'DEP-001')
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['reference'], 'DEP-001')
 
     def test_filter_by_amount_range(self):
         response = self.client.get(self.url, {'amount_min': '75', 'amount_max': '150'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['reference'], 'DEBIT-001')
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['reference'], 'DEBIT-001')
 
     def test_filter_by_transaction_type(self):
         response = self.client.get(self.url, {'transaction_type': 'DEBIT'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['reference'], 'DEBIT-001')
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['reference'], 'DEBIT-001')
 
     def test_filter_by_status(self):
         response = self.client.get(self.url, {'status': 'PENDING'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['reference'], 'DEBIT-001')
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['reference'], 'DEBIT-001')
 
     def test_filter_by_reference(self):
         response = self.client.get(self.url, {'reference': 'DEBIT-001'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['reference'], 'DEBIT-001')
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['reference'], 'DEBIT-001')
 
     def test_filter_by_created_at_range(self):
         self.transaction2.created_at = timezone.now() - timedelta(days=10)
@@ -146,8 +146,8 @@ class TransactionFilterTests(APITestCase):
             'created_at_before': (timezone.now() + timedelta(days=5)).isoformat()
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['reference'], 'DEBIT-001')
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['reference'], 'DEBIT-001')
 
     def test_filter_by_expiry_time_range(self):
         response = self.client.get(self.url, {
@@ -155,26 +155,26 @@ class TransactionFilterTests(APITestCase):
             'expiry_time_before': (timezone.now() + timedelta(hours=2)).isoformat()
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]['reference'], 'DEBIT-001')
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['results'][0]['reference'], 'DEBIT-001')
 
     def test_filter_by_involving_user(self):
         response = self.client.get(self.url, {'involving_user': 'user1'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
-        references = {t['reference'] for t in response.data}
+        self.assertEqual(len(response.data['results']), 2)
+        references = {t['reference'] for t in response.data['results']}
         self.assertEqual(references, {'DEBIT-001', 'DEP-001'})
 
     def test_ordering_by_amount(self):
         response = self.client.get(self.url, {'ordering': 'amount'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
-        self.assertEqual(response.data[0]['reference'], 'DEP-001')
-        self.assertEqual(response.data[1]['reference'], 'DEBIT-001')
+        self.assertEqual(len(response.data['results']), 2)
+        self.assertEqual(response.data['results'][0]['reference'], 'DEP-001')
+        self.assertEqual(response.data['results'][1]['reference'], 'DEBIT-001')
 
     def test_ordering_by_created_at_descending(self):
         response = self.client.get(self.url, {'ordering': 'created_at'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
-        self.assertEqual(response.data[0]['reference'], 'DEBIT-001')
-        self.assertEqual(response.data[1]['reference'], 'DEP-001')
+        self.assertEqual(len(response.data['results']), 2)
+        self.assertEqual(response.data['results'][0]['reference'], 'DEBIT-001')
+        self.assertEqual(response.data['results'][1]['reference'], 'DEP-001')

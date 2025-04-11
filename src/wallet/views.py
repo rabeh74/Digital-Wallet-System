@@ -34,6 +34,7 @@ from .serializers import (
 from .permissions import IsOwner
 from .service import WalletServiceFactory
 from .filters import WalletFilter, TransactionFilter
+from .pagination import TransactionPagination
 
 User = get_user_model()
 
@@ -228,6 +229,7 @@ class TransactionViewSet(BaseServiceViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_class = TransactionFilter
+    pagination_class = TransactionPagination
 
     def get_queryset(self):
         """
