@@ -3,6 +3,7 @@
 Views for the wallet app, handling wallet management, transactions, transfers,
 cash-outs, and webhook integrations using Django REST Framework.
 """
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample
 from django.core.cache import cache
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -218,6 +219,75 @@ class WalletViewSet(BaseServiceViewSet):
             )
         except Wallet.DoesNotExist:
             raise CustomValidationError("Wallet not found")
+    
+    @extend_schema(
+        summary='List wallets',
+        description='List wallets filtered by user, balance, and creation date',
+        parameters=[
+            OpenApiParameter(
+                name='user', 
+                type=OpenApiTypes.STR, 
+                location=OpenApiParameter.QUERY, 
+                description='Username (exact match)',
+                examples=[
+                    OpenApiExample(
+                        'johndoe',
+                        value='johndoe'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='balance_min', 
+                type=OpenApiTypes.DECIMAL, 
+                location=OpenApiParameter.QUERY, 
+                description='Minimum balance',
+                examples=[
+                    OpenApiExample(
+                        'Minimum $100',
+                        value=100.00
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='balance_max', 
+                type=OpenApiTypes.DECIMAL, 
+                location=OpenApiParameter.QUERY, 
+                description='Maximum balance',
+                examples=[
+                    OpenApiExample(
+                        'Maximum $500',
+                        value=500.00
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='created_at_after', 
+                type=OpenApiTypes.DATETIME, 
+                location=OpenApiParameter.QUERY, 
+                description='Created at (start range)',
+                examples=[
+                    OpenApiExample(
+                        'Created after 2024-01-01',
+                        value='2024-01-01T00:00:00Z'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='created_at_before', 
+                type=OpenApiTypes.DATETIME, 
+                location=OpenApiParameter.QUERY, 
+                description='Created at (end range)',
+                examples=[
+                    OpenApiExample(
+                        'Created before 2024-12-31',
+                        value='2024-12-31T23:59:59Z'
+                    )
+                ]
+            ),
+        ],
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
 
 class TransactionViewSet(BaseServiceViewSet):
     """
@@ -289,6 +359,166 @@ class TransactionViewSet(BaseServiceViewSet):
         except Transaction.DoesNotExist:
             raise CustomValidationError("Transaction not found or not yours")
     
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='sender',
+                type=OpenApiTypes.STR, 
+                location=OpenApiParameter.QUERY, 
+                description='Sender username (exact match)',
+                examples=[
+                    OpenApiExample(
+                        'Sender username',
+                        value='johndoe'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='recipient', 
+                type=OpenApiTypes.STR, 
+                location=OpenApiParameter.QUERY, 
+                description='Recipient username (exact match)',
+                examples=[
+                    OpenApiExample(
+                        'Recipient username',
+                        value='janedoe'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='involving_user', 
+                type=OpenApiTypes.STR, 
+                location=OpenApiParameter.QUERY, 
+                description='Transactions involving user as sender or recipient',
+                examples=[
+                    OpenApiExample(
+                        'Involving user',
+                        value='johndoe'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='amount_min', 
+                type=OpenApiTypes.DECIMAL, 
+                location=OpenApiParameter.QUERY, 
+                description='Minimum amount',
+                examples=[
+                    OpenApiExample(
+                        'Minimum amount',
+                        value='10.00'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='amount_max', 
+                type=OpenApiTypes.DECIMAL, 
+                location=OpenApiParameter.QUERY, 
+                description='Maximum amount',
+                examples=[
+                    OpenApiExample(
+                        'Maximum amount',
+                        value='100.00'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='transaction_type', 
+                type=OpenApiTypes.STR, 
+                location=OpenApiParameter.QUERY, 
+                description='Transaction type',
+                examples=[
+                    OpenApiExample(
+                        'Transaction type',
+                        value='DEBIT'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='funding_source', 
+                type=OpenApiTypes.STR, 
+                location=OpenApiParameter.QUERY, 
+                description='Funding source',
+                examples=[
+                    OpenApiExample(
+                        'Funding source',
+                        value='BANK'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='status', 
+                type=OpenApiTypes.STR, 
+                location=OpenApiParameter.QUERY, 
+                description='Status of the transaction',
+                examples=[
+                    OpenApiExample(
+                        'Status',
+                        value='PENDING'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='reference', 
+                type=OpenApiTypes.STR, 
+                location=OpenApiParameter.QUERY, 
+                description='Partial or full reference text',
+                examples=[
+                    OpenApiExample(
+                        'Reference',
+                        value='12345'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='created_at_after', 
+                type=OpenApiTypes.DATETIME, 
+                location=OpenApiParameter.QUERY, 
+                description='Created at (start range)',
+                examples=[
+                    OpenApiExample(
+                        'Created at after',
+                        value='2023-01-01T00:00:00Z'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='created_at_before', 
+                type=OpenApiTypes.DATETIME, 
+                location=OpenApiParameter.QUERY, 
+                description='Created at (end range)',
+                examples=[
+                    OpenApiExample(
+                        'Created at before',
+                        value='2023-12-31T23:59:59Z'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='expiry_time_after', 
+                type=OpenApiTypes.DATETIME, 
+                location=OpenApiParameter.QUERY, 
+                description='Expiry time (start range)',
+                examples=[
+                    OpenApiExample(
+                        'Expiry time after',
+                        value='2023-01-01T00:00:00Z'
+                    )
+                ]
+            ),
+            OpenApiParameter(
+                name='expiry_time_before', 
+                type=OpenApiTypes.DATETIME, 
+                location=OpenApiParameter.QUERY, 
+                description='Expiry time (end range)',
+                examples=[
+                    OpenApiExample(
+                        'Expiry time before',
+                        value='2023-12-31T23:59:59Z'
+                    )
+                ]
+            )
+        ]
+    )
     def list(self, request, *args, **kwargs):
         user_id = request.user.id
         page = request.query_params.get('page', '1')

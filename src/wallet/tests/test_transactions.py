@@ -217,7 +217,7 @@ class CashOutTests(APITestCase):
 
         transaction = Transaction.objects.get(wallet=self.user.wallet)
         self.assertEqual(transaction.status, Transaction.Status.PENDING)
-        self.assertEqual(transaction.amount, Decimal('-100.00'))
+        self.assertEqual(transaction.amount, Decimal('100.00'))
         self.wallet.refresh_from_db()
         self.assertEqual(self.wallet.balance, Decimal('1000.00'))
 

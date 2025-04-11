@@ -352,7 +352,7 @@ class TransferStrategy(TransactionStrategy):
         return self.transaction_repository.create(
             wallet=wallet,
             related_wallet=recipient_wallet,
-            amount=-amount,
+            amount=amount,
             transaction_type=Transaction.TransactionTypes.DEBIT,
             funding_source=Transaction.FundingSource.INTERNAL,
             status=Transaction.Status.PENDING,
@@ -596,7 +596,7 @@ class WalletService:
         withdrawal_code = str(uuid.uuid4().hex[:8]).upper()
         transaction = self.transaction_repository.create(
             wallet=wallet,
-            amount=-amount,
+            amount=amount,
             transaction_type=Transaction.TransactionTypes.WITHDRAWAL,
             funding_source=Transaction.FundingSource.BLF_ATM,
             reference=f"BLF-ATM-{withdrawal_code}",
@@ -631,12 +631,12 @@ class WalletService:
                 self.transaction_repository.update_status(transaction, Transaction.Status.EXPIRED)
                 raise ExpiredTransactionError("Withdrawal code has expired")
 
-            wallet = transaction.user.wallet
+            wallet = transaction.wallet
             if wallet.balance < abs(transaction.amount):
                 self.transaction_repository.update_status(transaction, Transaction.Status.FAILED)
                 raise InsufficientFundsError("Insufficient funds")
 
-            self.wallet_repository.update_balance(wallet, transaction.amount)
+            self.wallet_repository.update_balance(wallet, -transaction.amount)
             self.transaction_repository.update_status(transaction, Transaction.Status.COMPLETED)
             self.notification_service.send_transaction_notification(wallet.user.email, transaction, 'cash_out_verified')
             return transaction
