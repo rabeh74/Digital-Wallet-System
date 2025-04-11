@@ -17,6 +17,7 @@ class Wallet(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     currency = models.CharField(max_length=3, choices=Currencies.choices, default='USD')
     phone_number = models.CharField(max_length=15 , unique=True)
+    is_active = models.BooleanField(default=True)
 
 
     def __str__(self):
