@@ -43,8 +43,6 @@ class WalletFilter(filters.FilterSet):
 class TransactionFilter(filters.FilterSet):
     """
     FilterSet for Transaction model that allows filtering by:
-    - user (username exact match)
-    - related_user (username exact match)
     - amount (range, exact)
     - transaction_type (exact match)
     - funding_source (exact match)
@@ -53,17 +51,11 @@ class TransactionFilter(filters.FilterSet):
     - creation date (range)
     - expiry time (range)
     - involving user (sender or recipient)
+    - sender (username exact match)
+    - recipient (username exact match)
     """
-    user = filters.CharFilter(
-        field_name="user__username",
-        lookup_expr='iexact',
-        label='Sender username (exact match)'
-    )
-    related_user = filters.CharFilter(
-        field_name="related_user__username",
-        lookup_expr='iexact',
-        label='Recipient username (exact match)'
-    )
+    sender = filters.CharFilter(field_name="wallet__user__username", lookup_expr='iexact', label='Sender username (exact match)')
+    recipient = filters.CharFilter(field_name="related_wallet__user__username", lookup_expr='iexact', label='Recipient username (exact match)')
     amount = filters.RangeFilter(label='Amount range')
     transaction_type = filters.ChoiceFilter(
         choices=Transaction.TransactionTypes.choices,
@@ -105,8 +97,6 @@ class TransactionFilter(filters.FilterSet):
     class Meta:
         model = Transaction
         fields = {
-            'user': ['exact'],
-            'related_user': ['exact'],
             'amount': ['exact', 'gte', 'lte'],
             'transaction_type': ['exact'],
             'funding_source': ['exact'],
@@ -119,6 +109,6 @@ class TransactionFilter(filters.FilterSet):
     def filter_involving_user(self, queryset, name, value):
         """Filter transactions where the user is either the sender or recipient"""
         return queryset.filter(
-            Q(user__username__iexact=value) |
-            Q(related_user__username__iexact=value)
+            Q(wallet__user__username__iexact=value) |
+            Q(related_wallet__user__username__iexact=value)
         )

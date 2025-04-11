@@ -22,11 +22,11 @@ class CustomUserManager(BaseUserManager):
 
 class CustomUser(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
-    username = models.CharField(max_length=100, unique=True , blank=True)
+    username = models.CharField(max_length=100, unique=True )
     first_name = models.CharField(max_length=30, blank=True)
     last_name = models.CharField(max_length=30, blank=True)
     date_of_birth = models.DateField( null=True, blank=True) 
-    phone_number = models.CharField(max_length=15 , null=True, blank=True)
+    phone_number = models.CharField(max_length=15 , unique=True)
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     date_joined = models.DateTimeField(auto_now_add=True)

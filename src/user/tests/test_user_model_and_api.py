@@ -26,7 +26,7 @@ class UserPublicAPITests(APITestCase):
             'username' : "testuser",
             'password1':'test54*&^%&pass',
             'password2':'test54*&^%&pass',
-
+            'phone_number':'1234567890',
         }
     
     def test_create_user(self):
@@ -132,9 +132,9 @@ class UserAPITests(APITestCase):
         Ensure an admin can list all users.
         """
         admin_user = create_superuser(email='test1@example.com', password='testpass123' , username='admin')
-        create_user(email='test2@example.com', password='testpass123' , username='user2')
-        create_user(email='test3@example.com', password='testpass123' , username='user3')
-        create_user(email='test4@example.com', password='testpass123' , username='user4')
+        create_user(email='test2@example.com', password='testpass123' , username='user2', phone_number='96170123457')
+        create_user(email='test3@example.com', password='testpass123' , username='user3', phone_number='96170123458')
+        create_user(email='test4@example.com', password='testpass123' , username='user4', phone_number='96170123459')
 
         self.client.force_authenticate(user=admin_user)
         url = reverse('user:list_users')
@@ -146,7 +146,7 @@ class UserAPITests(APITestCase):
         """
         Ensure a user cannot update another user's details.
         """
-        another_user = create_user(username='test5', email='test5@example.com', password='testpass123')
+        another_user = create_user(username='test5', email='test5@example.com', password='testpass123', phone_number='96170123460')
         self.client.force_authenticate(user=another_user)
         response = self.client.put(self.user_update_url, {"email": "another_user@email.com"})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

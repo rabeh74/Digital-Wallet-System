@@ -81,7 +81,6 @@
 # wallet/serializers.py
 from rest_framework import serializers
 from django.utils import timezone
-from django.db.models import Q
 from .models import Wallet, Transaction
 from user.serializers import UserSerializer
 from django.contrib.auth import get_user_model
@@ -93,10 +92,11 @@ User = get_user_model()
 class WalletSerializer(serializers.ModelSerializer):
     """Serializer for Wallet model, including user details."""
     user = UserSerializer(read_only=True)
+    currency = serializers.ChoiceField(choices=Wallet.Currencies.choices)
 
     class Meta:
         model = Wallet
-        fields = ['id', 'user', 'balance', 'created_at']
+        fields = ['id', 'user', 'balance', 'currency', 'phone_number', 'created_at']
         read_only_fields = ['id', 'balance', 'created_at']
 
 
@@ -163,19 +163,19 @@ class TransferSerializer(serializers.Serializer):
 
 class TransactionSerializer(serializers.ModelSerializer):
     """Serializer for Transaction model, including user and recipient details."""
-    user = UserSerializer(read_only=True)
-    recipient_user = UserSerializer(read_only=True, source='related_user')
+    wallet = WalletSerializer(read_only=True)
+    recipient_wallet = WalletSerializer(read_only=True)
 
     class Meta:
         model = Transaction
         fields = [
             'id',
-            'recipient_user',
+            'recipient_wallet',
             'amount',
             'transaction_type',
             'funding_source',
             'reference',
-            'user',
+            'wallet',
             'status',
             'created_at'
         ]
@@ -209,7 +209,7 @@ class TransactionActionSerializer(serializers.Serializer):
             raise CustomValidationError("Pending transaction not found")
 
         # Only recipient can accept/reject
-        if recipient_tx.user != user:
+        if recipient_tx.wallet.user != user:
             raise CustomValidationError("You can only accept/reject your own transactions")
 
         return data
@@ -277,7 +277,7 @@ class CashOutVerifySerializer(serializers.Serializer):
         withdrawal_code = data['withdrawal_code']
 
         transaction = Transaction.objects.select_for_update().filter(
-            user__phone_number=phone_number,
+            wallet__user__phone_number=phone_number,
             reference__endswith=withdrawal_code,
             status=Transaction.Status.PENDING
         ).first()

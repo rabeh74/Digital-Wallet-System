@@ -1,15 +1,22 @@
 from django.db import models
 from django.contrib.auth import get_user_model
 from decimal import Decimal
-from django.core.exceptions import ValidationError
 
 User = get_user_model()
 
 class Wallet(models.Model):
+    class Currencies(models.TextChoices):
+        USD = 'USD', 'US Dollar'
+        EUR = 'EUR', 'Euro'
+        GBP = 'GBP', 'British Pound'
+        LBP = 'LBP', 'Lebanese Pound'
+        
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='wallet')
     balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    currency = models.CharField(max_length=3, choices=Currencies.choices, default='USD')
+    phone_number = models.CharField(max_length=15 , unique=True)
 
 
     def __str__(self):
@@ -35,12 +42,12 @@ class Transaction(models.Model):
         FAILED = 'FAILED', 'Failed'
         EXPIRED = 'EXPIRED', 'Expired'
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='transactions' , null=True, blank=True , default=None)
+    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions' , null=True, blank=True , default=None)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     transaction_type = models.CharField(max_length=10, choices=TransactionTypes.choices)
     funding_source = models.CharField(max_length=10, choices=FundingSource.choices, null=True, blank=True)
     reference = models.CharField(max_length=100 )
-    related_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='related_transactions' , null=True, blank=True , default=None)
+    related_wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='related_transactions' , null=True, blank=True , default=None)
     status = models.CharField(max_length=20, choices=Status.choices, default='PENDING')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

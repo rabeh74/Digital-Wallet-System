@@ -14,7 +14,8 @@ class WalletAPITests(APITestCase):
         self.user = User.objects.create_user(
             email='user@example.com',
             password='testpass123',
-            username='user'
+            username='user',
+            phone_number='96170123457'
         )
         self.client.force_authenticate(user=self.user)
         self.wallet_url = reverse('wallet:wallet-list')
@@ -52,17 +53,20 @@ class WalletAPITests(APITestCase):
         admin_user = User.objects.create_superuser(
             email='admin@example.com',
             password='adminpass123',
-            username='admin'
+            username='admin',
+            phone_number='96170123456'
         )
         User.objects.create_user(
             email='user1@example.com',
             password='user1pass123',
-            username='user1'
+            username='user1',
+            phone_number='96170125457'
         )
         User.objects.create_user(
             email='user2@example.com',
             password='user2pass123',
-            username='user2'
+            username='user2',
+            phone_number='96170123458'
         )
 
         self.client.force_authenticate(user=admin_user)
@@ -76,12 +80,14 @@ class WalletTransferTests(APITestCase):
         self.sender = User.objects.create_user(
             username='sender',
             password='testpass123',
-            email='sender@example.com'
+            email='sender@example.com',
+            phone_number='96170123459'
         )
         self.recipient = User.objects.create_user(
             username='recipient',
             password='testpass123',
-            email='recipient@example.com'
+            email='recipient@example.com',
+            phone_number='96170123460'
         )
 
         self.sender_wallet = self.sender.wallet

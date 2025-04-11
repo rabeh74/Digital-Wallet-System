@@ -132,7 +132,7 @@ class TransactionRepository(ITransactionRepository):
         Returns:
             Transaction: Transaction object or None if not found.
         """
-        return Transaction.objects.filter(reference=reference, user=wallet.user).first()
+        return Transaction.objects.filter(reference=reference, wallet=wallet).first()
 
     def get_by_id(self, transaction_id):
         """
@@ -162,7 +162,7 @@ class TransactionRepository(ITransactionRepository):
             Transaction: Matching transaction or None if not found.
         """
         return Transaction.objects.select_for_update().filter(
-            user__phone_number=phone_number,
+            wallet__user__phone_number=phone_number,
             reference__endswith=withdrawal_code,
             status=Transaction.Status.PENDING
         ).first()
@@ -219,17 +219,17 @@ class DepositStrategy(TransactionStrategy):
 
         """
         with db_transaction.atomic():
-            self.wallet_repository.update_balance(kwargs['user'].wallet, kwargs['amount'])
-            transaction = self._create_transaction(kwargs['user'], kwargs['amount'], kwargs['funding_source'], kwargs['reference'])
-        self.notification_service.send_transaction_notification(kwargs['user'].email, transaction, 'deposit')
+            self.wallet_repository.update_balance(kwargs['wallet'], kwargs['amount'])
+            transaction = self._create_transaction(kwargs['wallet'], kwargs['amount'], kwargs['funding_source'], kwargs['reference'])
+        self.notification_service.send_transaction_notification(kwargs['wallet'].user.email, transaction, 'deposit')
         return transaction
 
-    def _create_transaction(self, recipient_user, amount, funding_source, reference):
+    def _create_transaction(self, wallet, amount, funding_source, reference):
         """
         Create a deposit transaction.
 
         Args:
-            recipient_user: User receiving the deposit.
+            wallet: Wallet receiving the deposit.
             amount: Decimal amount.
             funding_source: Funding source enum.
             reference: Transaction reference string.
@@ -238,7 +238,7 @@ class DepositStrategy(TransactionStrategy):
             Transaction: Created transaction object.
         """
         return self.transaction_repository.create(
-            user=recipient_user,
+            wallet=wallet,
             amount=amount,
             transaction_type=Transaction.TransactionTypes.DEPOSIT,
             funding_source=funding_source,
@@ -274,9 +274,9 @@ class WithdrawalStrategy(TransactionStrategy):
             Transaction: Created transaction object.
         """
         with db_transaction.atomic():
-            self.wallet_repository.update_balance(kwargs['user'].wallet, -kwargs['amount'])
-            transaction = self._create_transaction(kwargs['user'], kwargs['amount'], kwargs['funding_source'], kwargs['reference'])
-        self.notification_service.send_transaction_notification(kwargs['user'].user.email, transaction, 'withdrawal')
+            self.wallet_repository.update_balance(kwargs['wallet'], -kwargs['amount'])
+            transaction = self._create_transaction(kwargs['wallet'], kwargs['amount'], kwargs['funding_source'], kwargs['reference'])
+        self.notification_service.send_transaction_notification(kwargs['wallet'].user.email, transaction, 'withdrawal')
         return transaction
 
     def _create_transaction(self, user, amount, funding_source, reference):
@@ -330,28 +330,28 @@ class TransferStrategy(TransactionStrategy):
         """
         reference = kwargs.get('reference') or f"TRANSFER-{uuid.uuid4().hex[:8]}"
         with db_transaction.atomic():
-            sender_transaction = self._process_sender_transaction(kwargs['user'], kwargs['recipient_user'], kwargs['amount'], reference)
-            recipient_transaction = self._process_recipient_transaction(kwargs['user'], kwargs['recipient_user'], kwargs['amount'], reference)
-        self._send_notifications(kwargs['user'], kwargs['recipient_user'], sender_transaction, recipient_transaction)
+            sender_transaction = self._process_sender_transaction(kwargs['wallet'], kwargs['recipient_wallet'], kwargs['amount'], reference)
+            recipient_transaction = self._process_recipient_transaction(kwargs['wallet'], kwargs['recipient_wallet'], kwargs['amount'], reference)
+        self._send_notifications(kwargs['wallet'].user, kwargs['recipient_wallet'].user, sender_transaction, recipient_transaction)
         return reference
 
-    def _process_sender_transaction(self, user, recipient_user, amount, reference):
+    def _process_sender_transaction(self, wallet, recipient_wallet, amount, reference):
         """
         Process the sender's side of the transfer.
 
         Args:
-            user: Sender user instance.
-            recipient_user: Recipient user instance.
+            wallet: Sender wallet instance.
+            recipient_wallet: Recipient wallet instance.
             amount: Decimal amount to transfer.
             reference: Transaction reference string.
 
         Returns:
             Transaction: Sender's transaction object.
         """
-        self.wallet_repository.update_balance(user.wallet, -amount)
+        self.wallet_repository.update_balance(wallet, -amount)
         return self.transaction_repository.create(
-            user=user,
-            related_user=recipient_user,
+            wallet=wallet,
+            related_wallet=recipient_wallet,
             amount=-amount,
             transaction_type=Transaction.TransactionTypes.DEBIT,
             funding_source=Transaction.FundingSource.INTERNAL,
@@ -359,12 +359,12 @@ class TransferStrategy(TransactionStrategy):
             reference=reference
         )
 
-    def _process_recipient_transaction(self, sender_user, recipient_user, amount, reference):
+    def _process_recipient_transaction(self, wallet, recipient_wallet, amount, reference):
         """
         Process the recipient's side of the transfer.
 
         Args:
-            sender_user: Sender user instance.
+            wallet: Sender wallet instance.
             recipient_user: Recipient user instance.
             amount: Decimal amount to transfer.
             reference: Transaction reference string.
@@ -373,8 +373,8 @@ class TransferStrategy(TransactionStrategy):
             Transaction: Recipient's transaction object.
         """
         return self.transaction_repository.create(
-            user=recipient_user,
-            related_user=sender_user,
+            wallet=recipient_wallet,
+            related_wallet=wallet,
             amount=amount,
             transaction_type=Transaction.TransactionTypes.CREDIT,
             funding_source=Transaction.FundingSource.INTERNAL,
@@ -443,7 +443,7 @@ class AcceptTransactionCommand(TransactionCommand):
         Args:
             recipient_transaction: Recipient's transaction object.
         """
-        recipient_wallet = recipient_transaction.user.wallet
+        recipient_wallet = recipient_transaction.wallet
         self.wallet_repository.update_balance(recipient_wallet, abs(recipient_transaction.amount))
         self.transaction_repository.update_status(recipient_transaction, Transaction.Status.ACCEPTED)
 
@@ -466,8 +466,8 @@ class AcceptTransactionCommand(TransactionCommand):
             sender_transaction: Sender's transaction object.
             recipient_transaction: Recipient's transaction object.
         """
-        self.notification_service.send_transaction_notification(sender_transaction.user.email, sender_transaction, 'transfer_accepted')
-        self.notification_service.send_transaction_notification(recipient_transaction.user.email, recipient_transaction, 'transfer_accepted')
+        self.notification_service.send_transaction_notification(sender_transaction.wallet.user.email, sender_transaction, 'transfer_accepted')
+        self.notification_service.send_transaction_notification(recipient_transaction.wallet.user.email, recipient_transaction, 'transfer_accepted')
 
 
 class RejectTransactionCommand(TransactionCommand):
@@ -507,7 +507,7 @@ class RejectTransactionCommand(TransactionCommand):
         Args:
             sender_transaction: Sender's transaction object.
         """
-        sender_wallet = sender_transaction.user.wallet
+        sender_wallet = sender_transaction.wallet
         self.wallet_repository.update_balance(sender_wallet, abs(sender_transaction.amount))
         self.transaction_repository.update_status(sender_transaction, Transaction.Status.REJECTED)
 
@@ -530,8 +530,8 @@ class RejectTransactionCommand(TransactionCommand):
             sender_transaction: Sender's transaction object.
             recipient_transaction: Recipient's transaction object.
         """
-        self.notification_service.send_transaction_notification(sender_transaction.user.email, sender_transaction, 'transfer_rejected')
-        self.notification_service.send_transaction_notification(recipient_transaction.user.email, recipient_transaction, 'transfer_rejected')
+        self.notification_service.send_transaction_notification(sender_transaction.wallet.user.email, sender_transaction, 'transfer_rejected')
+        self.notification_service.send_transaction_notification(recipient_transaction.wallet.user.email, recipient_transaction, 'transfer_rejected')
 
 
 class WalletService:
@@ -595,7 +595,7 @@ class WalletService:
 
         withdrawal_code = str(uuid.uuid4().hex[:8]).upper()
         transaction = self.transaction_repository.create(
-            user=wallet.user,
+            wallet=wallet,
             amount=-amount,
             transaction_type=Transaction.TransactionTypes.WITHDRAWAL,
             funding_source=Transaction.FundingSource.BLF_ATM,

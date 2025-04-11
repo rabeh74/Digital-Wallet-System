@@ -211,8 +211,8 @@ class WalletViewSet(BaseServiceViewSet):
         try:
             return self.wallet_service.process(
                 process_type='transfer',
-                user=sender,
-                recipient_user=recipient,
+                wallet=sender.wallet,
+                recipient_wallet=recipient.wallet,
                 amount=amount,
                 reference=reference
             )
@@ -240,7 +240,7 @@ class TransactionViewSet(BaseServiceViewSet):
         """
         queryset = Transaction.objects.all().order_by('-created_at')
         if not self.request.user.is_staff:
-            return queryset.filter(Q(user=self.request.user) | Q(related_user=self.request.user))
+            return queryset.filter(Q(wallet__user=self.request.user) | Q(related_wallet__user=self.request.user))
         return queryset
 
     @action(detail=False, methods=['post'], serializer_class=TransactionActionSerializer)
@@ -419,7 +419,7 @@ class PaysendWebhookView(BaseWebhookView):
         """
         return self.wallet_service.process(
             process_type='deposit',
-            user=wallet.user,
+            wallet=wallet,
             amount=amount,
             funding_source=Transaction.FundingSource.PAYSEND,
             reference=reference

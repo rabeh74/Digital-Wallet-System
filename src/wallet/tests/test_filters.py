@@ -14,8 +14,8 @@ User = get_user_model()
 class WalletFilterTests(APITestCase):
     def setUp(self):
         self.client = APIClient()
-        self.user1 = User.objects.create_user(username='user1', password='pass123', email='user1@example.com')
-        self.user2 = User.objects.create_user(username='user2', password='pass123', email='user2@example.com')
+        self.user1 = User.objects.create_user(username='user1', password='pass123', email='user1@example.com', phone_number='96170123457')
+        self.user2 = User.objects.create_user(username='user2', password='pass123', email='user2@example.com', phone_number='96170123458')
         
         self.wallet1 = self.user1.wallet
         self.wallet2 = self.user2.wallet
@@ -69,8 +69,8 @@ class WalletFilterTests(APITestCase):
 class TransactionFilterTests(APITestCase):
     def setUp(self):
         self.client = APIClient()
-        self.user1 = User.objects.create_user(username='user1', password='pass123', email='user1@example.com')
-        self.user2 = User.objects.create_user(username='user2', password='pass123', email='user2@example.com')
+        self.user1 = User.objects.create_user(username='user1', password='pass123', email='user1@example.com', phone_number='96170123457')
+        self.user2 = User.objects.create_user(username='user2', password='pass123', email='user2@example.com', phone_number='96170123458')
         self.wallet1 = self.user1.wallet
         self.wallet2 = self.user2.wallet
         self.wallet1.balance = Decimal('1000.00')
@@ -79,8 +79,8 @@ class TransactionFilterTests(APITestCase):
         self.wallet2.save()
         
         self.transaction1 = Transaction.objects.create(
-            user=self.user1,
-            related_user=self.user2,
+            wallet=self.wallet1,
+            related_wallet=self.wallet2,
             amount=Decimal('100.00'),
             transaction_type=Transaction.TransactionTypes.DEBIT,
             funding_source=Transaction.FundingSource.INTERNAL,
@@ -89,8 +89,8 @@ class TransactionFilterTests(APITestCase):
             expiry_time=timezone.now() + timedelta(hours=1)
         )
         self.transaction2 = Transaction.objects.create(
-            user=self.user2,
-            related_user=self.user1,
+            wallet=self.wallet2,
+            related_wallet=self.wallet1,
             amount=Decimal('50.00'),
             transaction_type=Transaction.TransactionTypes.DEPOSIT,
             funding_source=Transaction.FundingSource.PAYSEND,
@@ -103,13 +103,13 @@ class TransactionFilterTests(APITestCase):
         self.client.force_authenticate(user=self.admin)
 
     def test_filter_by_sender_user(self):
-        response = self.client.get(self.url, {'user': 'user1'})
+        response = self.client.get(self.url, {'sender': 'user1'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['results']), 1)
         self.assertEqual(response.data['results'][0]['reference'], 'DEBIT-001')
 
     def test_filter_by_recipient_user(self):
-        response = self.client.get(self.url, {'user': 'user2'})
+        response = self.client.get(self.url, {'recipient': 'user1'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['results']), 1)
         self.assertEqual(response.data['results'][0]['reference'], 'DEP-001')

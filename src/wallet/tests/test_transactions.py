@@ -20,11 +20,12 @@ class TransactionViewSetTests(APITestCase):
         self.user = User.objects.create_user(
             username='testuser',
             password='testpass123',
-            email='testuser@example.com'
+            email='testuser@example.com',
+            phone_number='96170123456'
         )
         self.wallet = self.user.wallet
         self.deposit = Transaction.objects.create(
-            user=self.user,
+            wallet=self.user.wallet,
             amount=Decimal('50.00'),
             transaction_type=Transaction.TransactionTypes.DEPOSIT,
             funding_source=Transaction.FundingSource.PAYSEND,
@@ -32,7 +33,7 @@ class TransactionViewSetTests(APITestCase):
             status=Transaction.Status.COMPLETED
         )
         self.withdrawal = Transaction.objects.create(
-            user=self.user,
+            wallet=self.user.wallet,
             amount=Decimal('-20.00'),
             transaction_type=Transaction.TransactionTypes.WITHDRAWAL,
             funding_source=Transaction.FundingSource.BLF_ATM,
@@ -173,7 +174,7 @@ class CashOutTests(APITestCase):
         self.assertIn('withdrawal_code', response.data)
         self.assertEqual(Decimal(response.data['amount']), Decimal('100.00'))
 
-        transaction = Transaction.objects.get(user=self.user)
+        transaction = Transaction.objects.get(wallet=self.user.wallet)
         self.assertEqual(transaction.status, Transaction.Status.PENDING)
         self.assertEqual(transaction.amount, Decimal('-100.00'))
         self.wallet.refresh_from_db()
@@ -200,7 +201,7 @@ class CashOutTests(APITestCase):
         response = self.client.post(self.url_request, {'amount': '100.00'}, format='json')
         withdrawal_code = response.data['withdrawal_code']
 
-        transaction = Transaction.objects.get(user=self.user)
+        transaction = Transaction.objects.get(wallet=self.user.wallet)
         transaction.expiry_time = timezone.now() - timedelta(minutes=1)
         transaction.save()
 

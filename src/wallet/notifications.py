@@ -11,8 +11,8 @@ class NotificationService:
             'transaction_id' : transaction.id,
             'reference' : transaction.reference,
             'created_at' : transaction.created_at,
-            'user' : transaction.user.email if transaction.user else None,
-            'related_user' : transaction.related_user.email if transaction.related_user else None,
+            'user' : transaction.wallet.user.email if transaction.wallet else None,
+            'related_user' : transaction.related_wallet.user.email if transaction.related_wallet else None,
             'message_type' : message_type,
             'type' : transaction.transaction_type
         }

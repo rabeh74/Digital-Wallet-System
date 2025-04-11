@@ -19,4 +19,4 @@ def create_user_wallet(sender, instance, created, **kwargs):
         **kwargs: Additional keyword arguments.
     """
     if created and not instance.is_staff:
-        Wallet.objects.create(user=instance)
+        Wallet.objects.create(user=instance, phone_number=instance.phone_number)
