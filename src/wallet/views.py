@@ -299,6 +299,7 @@ class TransactionViewSet(BaseServiceViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_class = TransactionFilter
     pagination_class = TransactionPagination
+    http_method_names = ['get', 'post']
 
     def get_queryset(self):
         """

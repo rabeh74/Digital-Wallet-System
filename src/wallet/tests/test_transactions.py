@@ -98,6 +98,13 @@ class TransactionViewSetTests(APITestCase):
         self.assertEqual(len(response.data['results']), 5)  # Remaining items
         cache_key_page2 = f"transaction_list_{self.user.id}_page_2_size_10"
         self.assertIsNotNone(cache.get(cache_key_page2))
+    
+    def test_try_not_allowed_method(self):
+        response = self.client.put(self.transactions_url)
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        response = self.client.delete(self.transactions_url)
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
 
        
 
