@@ -38,7 +38,6 @@ def invalidate_transaction_cache(sender, instance, created, **kwargs):
             user_ids.append(instance.wallet.user.id)
         if instance.related_wallet and instance.related_wallet.user:
             user_ids.append(instance.related_wallet.user.id)
-
         for user_id in user_ids:
             cache_key_pattern = f"transaction_list_{user_id}_*"
             cache.delete_pattern(cache_key_pattern)

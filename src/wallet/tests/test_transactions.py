@@ -11,8 +11,12 @@ import json
 import hmac
 import hashlib
 from django.conf import settings
-from wallet.models import Transaction
+from wallet.models import Transaction , Wallet
 from django.core.cache import cache
+from django.test import TestCase
+from django.db.models.signals import post_save
+from wallet.signals import invalidate_transaction_cache
+
 
 User = get_user_model()
 
@@ -307,3 +311,50 @@ class CashOutTests(APITestCase):
         }, format='json' , HTTP_Idempotency_Key = str(uuid.uuid4()))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data['detail'], 'Insufficient funds')
+    
+
+
+class TransactionCacheInvalidationTests(TestCase):
+    def setUp(self):
+        # Create test users and wallets
+        self.user1 = User.objects.create_user(username='user1', email='user1@example.com' , phone_number='+96112345678',)
+        self.user2 = User.objects.create_user(username='user2', email='user2@example.com' , phone_number='+9611234532678',)
+
+        self.wallet1 = self.user1.wallet
+        self.wallet2 = self.user2.wallet
+        self.wallet1.balance = Decimal('1000.00')
+        self.wallet2.balance = Decimal('500.00')
+        self.wallet1.save()
+        self.wallet2.save()
+
+        # Populate cache with sample data
+        self.cache_key1 = "transaction_list_{}_page_1_size_10".format(self.user1.id)
+        self.cache_key2 = "transaction_list_{}_page_1_size_10".format(self.user2.id)
+        cache.set(self.cache_key1, {"transactions": ["test_data_1"]}, timeout=3600)
+        cache.set(self.cache_key2, {"transactions": ["test_data_2"]}, timeout=3600)
+
+        # Ensure signal is connected (should be by default via apps.py)
+        post_save.connect(invalidate_transaction_cache, sender=Transaction)
+
+    def tearDown(self):
+        # Clear cache and disconnect signal for clean slate
+        cache.clear()
+        post_save.disconnect(invalidate_transaction_cache, sender=Transaction)
+
+    def test_cache_invalidation_on_create_single_user(self):
+        """Test cache invalidation for a transaction with only wallet.user."""
+        # Verify cache exists initially
+        self.assertIsNotNone(cache.get(self.cache_key1))
+        self.assertIsNotNone(cache.get(self.cache_key2))
+
+        # Create a transaction
+        Transaction.objects.create(
+            wallet=self.wallet1,
+            amount=Decimal('50.00'),
+            transaction_type=Transaction.TransactionTypes.DEPOSIT,
+            status=Transaction.Status.COMPLETED,
+            reference='TEST_DEPOSIT_001'
+        )
+
+        self.assertIsNone(cache.get(self.cache_key1))
+        self.assertIsNotNone(cache.get(self.cache_key2))
