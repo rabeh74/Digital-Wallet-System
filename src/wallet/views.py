@@ -3,7 +3,7 @@
 Views for the wallet app, handling wallet management, transactions, transfers,
 cash-outs, and webhook integrations using Django REST Framework.
 """
-
+from django.core.cache import cache
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -37,7 +37,7 @@ from .filters import WalletFilter, TransactionFilter
 from .pagination import TransactionPagination
 
 User = get_user_model()
-
+CACHE_TIMEOUT = settings.CACHE_TIMEOUT
 
 class BaseServiceViewSet(viewsets.ModelViewSet):
     """Base viewset providing service injection for wallet and transaction services."""
@@ -75,7 +75,7 @@ class WalletViewSet(BaseServiceViewSet):
         Returns:
             QuerySet: Filtered wallets (all for staff, user-specific otherwise).
         """
-        queryset = Wallet.objects.all()
+        queryset = Wallet.objects.select_related('user').all()
         if not self.request.user.is_staff:
             return queryset.filter(user=self.request.user)
         return queryset
@@ -219,7 +219,6 @@ class WalletViewSet(BaseServiceViewSet):
         except Wallet.DoesNotExist:
             raise CustomValidationError("Wallet not found")
 
-
 class TransactionViewSet(BaseServiceViewSet):
     """
     Read-only viewset for listing and retrieving transactions, with action processing.
@@ -238,7 +237,7 @@ class TransactionViewSet(BaseServiceViewSet):
         Returns:
             QuerySet: Filtered transactions (all for staff, user-related otherwise).
         """
-        queryset = Transaction.objects.all().order_by('-created_at')
+        queryset = Transaction.objects.select_related('wallet', 'wallet__user', 'related_wallet', 'related_wallet__user').all().order_by('-created_at')
         if not self.request.user.is_staff:
             return queryset.filter(Q(wallet__user=self.request.user) | Q(related_wallet__user=self.request.user))
         return queryset
@@ -289,6 +288,28 @@ class TransactionViewSet(BaseServiceViewSet):
             return Transaction.objects.get(reference=reference, transaction_type=transaction_type)
         except Transaction.DoesNotExist:
             raise CustomValidationError("Transaction not found or not yours")
+    
+    def list(self, request, *args, **kwargs):
+        user_id = request.user.id
+        page = request.query_params.get('page', '1')
+        page_size = request.query_params.get('page_size', self.pagination_class.page_size)
+        cache_key = f"transaction_list_{user_id}_page_{page}_size_{page_size}"
+
+        cached_data = cache.get(cache_key)
+        if cached_data is not None:
+            return Response(cached_data)
+
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            data = self.get_paginated_response(serializer.data).data
+        else:
+            serializer = self.get_serializer(queryset, many=True)
+            data = serializer.data
+
+        cache.set(cache_key, data, timeout=CACHE_TIMEOUT)
+        return Response(data)
 
 
 class BaseWebhookView(GenericAPIView):

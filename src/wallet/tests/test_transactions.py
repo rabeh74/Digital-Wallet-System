@@ -10,13 +10,15 @@ import json
 import hmac
 import hashlib
 from django.conf import settings
-from wallet.models import Wallet, Transaction
+from wallet.models import Transaction
+from django.core.cache import cache
 
 User = get_user_model()
 
 
 class TransactionViewSetTests(APITestCase):
     def setUp(self):
+        cache.clear()
         self.user = User.objects.create_user(
             username='testuser',
             password='testpass123',
@@ -59,6 +61,45 @@ class TransactionViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['id'], self.deposit.id)
         self.assertEqual(response.data['reference'], 'Initial deposit')
+    
+    def test_caching_and_pagination(self):
+        """Test caching and pagination"""
+        Transaction.objects.all().delete()
+        for i in range(15):
+            Transaction.objects.create(
+                wallet=self.user.wallet,
+                amount=Decimal('10.00'),
+                transaction_type=Transaction.TransactionTypes.DEPOSIT,
+                funding_source=Transaction.FundingSource.PAYSEND,
+                reference=f'Transaction {i}',
+                status=Transaction.Status.COMPLETED
+            )
+        with self.assertNumQueries(2):
+            response = self.client.get(self.transactions_url, {'page': 1})
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(len(response.data['results']), 10)
+            self.assertEqual(response.data['count'], 15)
+
+        # Check cache
+        cache_key = f"transaction_list_{self.user.id}_page_1_size_10"
+        cached_data = cache.get(cache_key)
+        self.assertIsNotNone(cached_data)
+        self.assertEqual(cached_data['count'], 15)
+
+        # Page 1: uses cache
+        with self.assertNumQueries(0):
+            response = self.client.get(self.transactions_url, {'page': 1})
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.data, cached_data)
+
+        # Page 2: hits DB
+        response = self.client.get(self.transactions_url, {'page': 2})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 5)  # Remaining items
+        cache_key_page2 = f"transaction_list_{self.user.id}_page_2_size_10"
+        self.assertIsNotNone(cache.get(cache_key_page2))
+
+       
 
 
 class PaysendWebhookTests(APITestCase):

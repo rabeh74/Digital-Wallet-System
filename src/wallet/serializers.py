@@ -288,7 +288,7 @@ class CashOutVerifySerializer(serializers.Serializer):
         if timezone.now() > transaction.expiry_time:
             raise CustomValidationError("Withdrawal code has expired")
 
-        wallet = transaction.user.wallet
+        wallet = transaction.wallet
         if wallet.balance < abs(transaction.amount):
             raise CustomValidationError("Insufficient funds")
 

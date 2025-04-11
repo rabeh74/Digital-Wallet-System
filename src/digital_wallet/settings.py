@@ -202,4 +202,16 @@ CELERY_TIMEZONE = 'UTC'
 # PaySend Webhook Configuration
 PAYSEND_WEBHOOK_SECRET = os.getenv('PAYSEND_WEBHOOK_SECRET')
 
+# Cache Configuration
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://:redis@redis:6379/1',  
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'PASSWORD': 'redis', 
+        }
+    }
+}
 
+CACHE_TIMEOUT = 60 * 15 
