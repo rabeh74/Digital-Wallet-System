@@ -11,5 +11,5 @@ class TransactionAdmin(admin.ModelAdmin):
 
 @admin.register(Wallet)
 class WalletAdmin(admin.ModelAdmin):
-    list_display = ('user', 'balance')
-    search_fields = ('user__username',)
+    list_display = ('user', 'balance', 'currency', 'phone_number', 'is_active', 'created_at', 'updated_at')
+    search_fields = ('user__username', 'phone_number')

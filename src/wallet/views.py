@@ -311,7 +311,7 @@ class TransactionViewSet(BaseServiceViewSet):
         """
         queryset = Transaction.objects.select_related('wallet', 'wallet__user', 'related_wallet', 'related_wallet__user').all().order_by('-created_at')
         if not self.request.user.is_staff:
-            return queryset.filter(Q(wallet__user=self.request.user) | Q(related_wallet__user=self.request.user))
+            return queryset.filter(Q(wallet__user=self.request.user))
         return queryset
 
     @action(detail=False, methods=['post'], serializer_class=TransactionActionSerializer)

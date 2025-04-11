@@ -5,7 +5,7 @@ from .models import CustomUser
 class CustomUserAdmin(UserAdmin):
     model = CustomUser
     ordering = ('email' ,)
-    list_display = ['email', 'first_name', 'last_name', 'is_staff', 'is_active']
+    list_display = ['email','username', 'first_name', 'last_name', 'phone_number', 'is_staff', 'is_active']
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
         ('Personal Info', {'fields': ('first_name', 'last_name', 'phone_number', 'date_of_birth')}),
@@ -15,7 +15,7 @@ class CustomUserAdmin(UserAdmin):
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('email', 'first_name', 'last_name', 'password', 'is_staff', 'is_active')}
+            'fields': ('email', 'username', 'first_name', 'last_name', 'phone_number', 'password', 'is_staff', 'is_active', 'date_of_birth' ,)}
         ),
     )
 

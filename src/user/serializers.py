@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
+import re
 
 User = get_user_model()
 
@@ -65,6 +66,12 @@ class UserSerializer(serializers.ModelSerializer):
         """Ensure date of birth is valid."""
         if value and value > timezone.now().date():
             raise serializers.ValidationError("Date of birth cannot be in the future")
+        return value
+        
+    def validate_phone_number(self, value):
+        """Ensure phone number is valid."""
+        if not re.match(r'^\+?[1-9]\d{7,14}$', value):
+            raise serializers.ValidationError("Invalid phone number format")
         return value
 
     def validate(self, data):

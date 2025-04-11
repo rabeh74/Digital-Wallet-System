@@ -34,6 +34,7 @@ class WalletAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['user']['id'], self.user.id)
+        self.assertEqual(response.data[0]['balance'], '0.00')
 
     def test_unauthenticated_access(self):
         """Test that unauthenticated users can't access wallets"""

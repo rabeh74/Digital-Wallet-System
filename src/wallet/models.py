@@ -65,7 +65,7 @@ class Transaction(models.Model):
             models.Index(fields=['status' , 'created_at'])
         ]
     def __str__(self):
-        return f"{self.get_transaction_type_display()} of {self.amount} for {self.user.username}"
+        return f"{self.get_transaction_type_display()} of {self.amount} for {self.wallet.user.username}"
     
     def get_transaction_type_display(self):
         return self.TransactionTypes(self.transaction_type)
