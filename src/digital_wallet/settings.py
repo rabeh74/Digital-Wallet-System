@@ -163,6 +163,7 @@ REST_FRAMEWORK = {
         'anon': '100/day',  
         'user': '1000/day',
         'registration': '100/day',
+        'wallet': '100/day',
     },
 }
 
@@ -198,6 +199,12 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
+CELERY_BEAT_SCHEDULE = {
+    'expire_old_transactions': {
+        'task': 'wallet.tasks.expire_old_transactions',
+        'schedule': 6 * 60 * 60 ,  # Run every 6 hours
+    },
+}
 
 # PaySend Webhook Configuration
 PAYSEND_WEBHOOK_SECRET = os.getenv('PAYSEND_WEBHOOK_SECRET')
@@ -215,3 +222,9 @@ CACHES = {
 }
 
 CACHE_TIMEOUT = 60 * 15 
+
+
+
+# IP whitelist
+IP_WHITELIST = ['127.0.0.1', '0.0.0.0' , '172.17.0.1', '172.17.0.2']
+

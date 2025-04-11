@@ -66,6 +66,7 @@ class WalletViewSet(BaseServiceViewSet):
 
     serializer_class = WalletSerializer
     permission_classes = [IsAuthenticated, IsOwner]
+    throttle_scope = 'wallet'
     http_method_names = ['get', 'post']
     filterset_class = WalletFilter
 
@@ -545,6 +546,7 @@ class TransactionViewSet(BaseServiceViewSet):
 
 class BaseWebhookView(GenericAPIView):
     """Base view for webhook endpoints with wallet service injection."""
+    throttle_scope = 'wallet'
 
     def __init__(self, wallet_service=None, *args, **kwargs):
         """
@@ -579,6 +581,8 @@ class PaysendWebhookView(BaseWebhookView):
         Returns:
             Response: Processing status or error details.
         """
+        if request.META.get('REMOTE_ADDR') not in settings.IP_WHITELIST:
+            return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
         if not self._verify_signature(request.body, request.headers.get('X-Paysend-Signature', '')):
             return Response({'detail': 'Invalid signature'}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -704,6 +708,9 @@ class CashOutVerifyView(BaseWebhookView):
         withdrawal_code = serializer.validated_data['withdrawal_code']
 
         try:
+            if request.META.get('REMOTE_ADDR') not in settings.IP_WHITELIST:
+                return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+            
             transaction = self.wallet_service.verify_cash_out(phone_number, withdrawal_code)
             return Response(
                 {

@@ -124,6 +124,7 @@ class PaysendWebhookTests(APITestCase):
 
         self.webhook_url = reverse('wallet:paysend-webhook')
         settings.PAYSEND_WEBHOOK_SECRET = 'test_webhook_secret'
+        settings.IP_WHITELIST = ['127.0.0.1']
 
     def get_signature(self, payload):
         """Generate valid HMAC signature for payload"""
@@ -146,6 +147,7 @@ class PaysendWebhookTests(APITestCase):
             content_type='application/json',
             HTTP_X_PAYSEND_SIGNATURE=signature
         )
+        print(response.data)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['status'], 'processed')
         self.wallet.refresh_from_db()
@@ -195,6 +197,26 @@ class PaysendWebhookTests(APITestCase):
         self.assertEqual(response.data['status'], 'already_processed')
         self.wallet.refresh_from_db()
         self.assertEqual(self.wallet.balance, Decimal('160.00'))
+    
+    def test_ip_not_whitelisted(self):
+        """Test unauthorized webhook request due to IP not whitelisted"""
+        payload = {
+            'transactionId': 'pay_123456789',
+            'status': 'COMPLETED',
+            'recipient': {'phone_number': '96170123456', 'amount': '60.00'}
+        }
+        payload_bytes = json.dumps(payload).encode('utf-8')
+        signature = self.get_signature(payload_bytes)
+
+        settings.IP_WHITELIST = []
+        response = self.client.post(
+            self.webhook_url,
+            data=payload_bytes,
+            content_type='application/json',
+            HTTP_X_PAYSEND_SIGNATURE=signature
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.data['detail'], 'Unauthorized')
 
 
 class CashOutTests(APITestCase):

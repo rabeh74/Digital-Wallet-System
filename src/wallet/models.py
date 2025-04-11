@@ -19,6 +19,11 @@ class Wallet(models.Model):
     phone_number = models.CharField(max_length=15 , unique=True)
     is_active = models.BooleanField(default=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['user']),
+            models.Index(fields=['phone_number']),
+        ]
 
     def __str__(self):
         return f"{self.user.username}'s Wallet (Balance: {self.balance})"
@@ -53,7 +58,12 @@ class Transaction(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     expiry_time = models.DateTimeField(null=True, blank=True)
-    
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['reference']),
+            models.Index(fields=['status' , 'created_at'])
+        ]
     def __str__(self):
         return f"{self.get_transaction_type_display()} of {self.amount} for {self.user.username}"
     
