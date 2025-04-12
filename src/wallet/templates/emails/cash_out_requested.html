@@ -15,7 +15,7 @@
             <td bgcolor="#ffffff" style="padding: 30px;">
                 <p style="font-size: 16px; color: #333;">Hi there,</p>
                 <p style="font-size: 16px; color: #333;">
-                    Your cash out request of <strong>{{ amount}}</strong> has been initiated. Use the code below at a BLF ATM:
+                    Your cash out request of <strong>{{ amount }}</strong> has been initiated. Use the code below at a BLF ATM:
                 </p>
                 <p style="font-size: 24px; color: #4CAF50; text-align: center; margin: 20px 0;">
                     <strong>{{ reference|slice:"-8:" }}</strong>
@@ -24,15 +24,20 @@
                 <table style="font-size: 16px; color: #333; width: 100%;">
                     <tr>
                         <td style="padding: 5px 0;">Amount:</td>
-                        <td style="padding: 5px 0;"><strong>{{ amount}}</strong></td>
+                        <td style="padding: 5px 0;"><strong>{{ amount }}</strong></td>
                     </tr>
                     <tr>
                         <td style="padding: 5px 0;">Reference:</td>
                         <td style="padding: 5px 0;"><strong>{{ reference }}</strong></td>
                     </tr>
                     <tr>
-                        <td style="padding: 5px 0;">Expires:</td>
-                        <td style="padding: 5px 0;"><strong>{{ expiry_time|date:"Y-m-d H:i:s" }}</strong></td>
+                        {% if expiry_time %}
+                            <td style="padding: 5px 0;">Expires:</td>
+                            <td style="padding: 5px 0;"><strong>{{ expiry_time|date:"Y-m-d H:i:s" }}</strong></td>
+                        {% else %}
+                            <td style="padding: 5px 0;">Expires:</td>
+                            <td style="padding: 5px 0;"><strong>Not available</strong></td>
+                        {% endif %}
                     </tr>
                 </table>
                 <p style="font-size: 16px; color: #333; margin-top: 20px;">Hurry, the code expires in 30 minutes!</p>

@@ -1,7 +1,11 @@
 """
-Views for the wallet app, handling wallet management, transactions, transfers,
-cash-outs, and webhook integrations using Django REST Framework.
+Views for the wallet app.
+
+This module handles wallet management, transactions, transfers, cash-outs, and
+webhook integrations using Django REST Framework, with logging for HTTP requests
+and responses.
 """
+
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample
 from django.core.cache import cache
 from rest_framework import viewsets, status
@@ -35,10 +39,11 @@ from .permissions import IsOwner
 from .service import WalletServiceFactory
 from .filters import WalletFilter, TransactionFilter
 from .pagination import TransactionPagination
-from .utils import IdempotencyMixin, IdempotencyChecker
+from .utils import set_logging_context, IdempotencyMixin, IdempotencyChecker
+import logging
 
 User = get_user_model()
-CACHE_TIMEOUT = settings.CACHE_TIMEOUT
+logger = logging.getLogger('wallet.views')
 
 class BaseServiceViewSet(viewsets.ModelViewSet):
     """Base viewset providing service injection for wallet and transaction services."""
@@ -77,6 +82,7 @@ class WalletViewSet(BaseServiceViewSet):
         Returns:
             QuerySet: Filtered wallets (all for staff, user-specific otherwise).
         """
+        set_logging_context(user_id=self.request.user.id)
         queryset = Wallet.objects.select_related('user').all()
         if not self.request.user.is_staff:
             return queryset.filter(user=self.request.user)
@@ -94,14 +100,22 @@ class WalletViewSet(BaseServiceViewSet):
         Returns:
             Response: Wallet data on success, error message if wallet exists.
         """
+        set_logging_context(user_id=request.user.id)
+        logger.info("Wallet creation request", extra={'user_id': request.user.id})
+        
         if hasattr(request.user, 'wallet'):
+            logger.warning("Wallet already exists", extra={'user_id': request.user.id})
             return Response(
                 {'detail': 'Wallet already exists'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        wallet = self.wallet_service.create_wallet(request.user)
-        serializer = self.get_serializer(wallet)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        try:
+            wallet = self.wallet_service.create_wallet(request.user)
+            serializer = self.get_serializer(wallet)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            logger.error(f"Wallet creation failed: {str(e)}", extra={'user_id': request.user.id})
+            raise
 
     @action(detail=False, methods=['post'], serializer_class=TransferSerializer)
     def transfer(self, request):
@@ -114,19 +128,35 @@ class WalletViewSet(BaseServiceViewSet):
         Returns:
             Response: Success message with reference or error details.
         """
+        set_logging_context(user_id=request.user.id)
+        logger.info("Transfer request", extra={'user_id': request.user.id})
+        
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         recipient_username = serializer.validated_data['recipient_username']
         amount = Decimal(serializer.validated_data['amount'])
 
-        sender_user = request.user
-        recipient_user = self._get_recipient_user(recipient_username)
-        reference = self._process_transfer(sender_user, recipient_user, amount)
-        return Response(
-            {'message': 'Transfer initiated successfully', 'reference': reference},
-            status=status.HTTP_200_OK
-        )
+        try:
+            sender_user = request.user
+            recipient_user = self._get_recipient_user(recipient_username)
+            reference = self._process_transfer(sender_user, recipient_user, amount)
+            logger.info(
+                "Transfer initiated", 
+                extra={
+                    'user_id': sender_user.id,
+                    'recipient_id': recipient_user.id,
+                    'transaction_ref': reference,
+                    'amount': str(amount)
+                }
+            )
+            return Response(
+                {'message': 'Transfer initiated successfully', 'reference': reference},
+                status=status.HTTP_200_OK
+            )
+        except CustomValidationError as e:
+            logger.error(f"Transfer failed: {str(e)}", extra={'user_id': request.user.id})
+            raise
 
     @action(detail=False, methods=['post'], serializer_class=CashOutRequestSerializer)
     def cash_out_request(self, request):
@@ -139,25 +169,32 @@ class WalletViewSet(BaseServiceViewSet):
         Returns:
             Response: Cash-out details (withdrawal_code, amount, phone_number) or error.
         """
+        set_logging_context(user_id=request.user.id)
+        logger.info("Cash-out request", extra={'user_id': request.user.id})
+        
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         amount = Decimal(serializer.validated_data['amount'])
-        wallet = self._get_user_wallet(request.user)
-        withdrawal_code = self.wallet_service.request_cash_out(wallet, amount)
-        return Response(
-            {
-                'message': 'Cash out request created',
-                'withdrawal_code': withdrawal_code,
-                'amount': str(amount),
-                'phone_number': request.user.phone_number
-            },
-            status=status.HTTP_200_OK
-        )
+        try:
+            wallet = self._get_user_wallet(request.user)
+            withdrawal_code = self.wallet_service.request_cash_out(wallet, amount)
+            return Response(
+                {
+                    'message': 'Cash out request created',
+                    'withdrawal_code': withdrawal_code,
+                    'amount': str(amount),
+                    'phone_number': request.user.phone_number
+                },
+                status=status.HTTP_200_OK
+            )
+        except CustomValidationError as e:
+            logger.error(f"Cash-out request failed: {str(e)}", extra={'user_id': request.user.id})
+            raise
 
     def _get_user_wallet(self, user):
         """
-        Retrieve the user's wallet, raising an error if it doesn’t exist.
+        Retrieve the user's wallet, raising an error if it doesn't exist.
 
         Args:
             user: User instance to fetch wallet for.
@@ -169,6 +206,7 @@ class WalletViewSet(BaseServiceViewSet):
             CustomValidationError: If no wallet is found.
         """
         if not hasattr(user, 'wallet'):
+            logger.error("No wallet found", extra={'user_id': user.id})
             raise CustomValidationError("No wallet found for user")
         return user.wallet
 
@@ -183,14 +221,16 @@ class WalletViewSet(BaseServiceViewSet):
             User: Recipient user object.
 
         Raises:
-            CustomValidationError: If user doesn’t exist or is the same as the sender.
+            CustomValidationError: If user doesn't exist or is the same as the sender.
         """
         try:
             recipient = User.objects.get(username=username)
             if recipient == self.request.user:
+                logger.error("Self-transfer attempt", extra={'user_id': self.request.user.id})
                 raise CustomValidationError("Cannot transfer to yourself")
             return recipient
         except User.DoesNotExist:
+            logger.error(f"Recipient not found: {username}", extra={'user_id': self.request.user.id})
             raise CustomValidationError(f"User with username {username} does not exist")
 
     def _process_transfer(self, sender, recipient, amount):
@@ -201,7 +241,6 @@ class WalletViewSet(BaseServiceViewSet):
             sender: User initiating the transfer.
             recipient: User receiving the transfer.
             amount: Decimal amount to transfer.
-            reference: Optional transaction reference.
 
         Returns:
             str: Transaction reference.
@@ -210,23 +249,28 @@ class WalletViewSet(BaseServiceViewSet):
             CustomValidationError: If wallet is not found or transfer fails.
         """
         try:
-            return self.wallet_service.process(
+            reference = self.wallet_service.process(
                 process_type='transfer',
                 wallet=sender.wallet,
                 recipient_wallet=recipient.wallet,
                 amount=amount,
             )
+            return reference
         except Wallet.DoesNotExist:
+            logger.error("Wallet not found", extra={'user_id': sender.id})
             raise CustomValidationError("Wallet not found")
-    
+        except Exception as e:
+            logger.error(f"Transfer processing error: {str(e)}", extra={'user_id': sender.id})
+            raise
+
     @extend_schema(
         summary='List wallets',
         description='List wallets filtered by user, balance, and creation date',
         parameters=[
             OpenApiParameter(
-                name='user', 
-                type=OpenApiTypes.STR, 
-                location=OpenApiParameter.QUERY, 
+                name='user',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
                 description='Username (exact match)',
                 examples=[
                     OpenApiExample(
@@ -236,9 +280,9 @@ class WalletViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='balance_min', 
-                type=OpenApiTypes.DECIMAL, 
-                location=OpenApiParameter.QUERY, 
+                name='balance_min',
+                type=OpenApiTypes.DECIMAL,
+                location=OpenApiParameter.QUERY,
                 description='Minimum balance',
                 examples=[
                     OpenApiExample(
@@ -248,9 +292,9 @@ class WalletViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='balance_max', 
-                type=OpenApiTypes.DECIMAL, 
-                location=OpenApiParameter.QUERY, 
+                name='balance_max',
+                type=OpenApiTypes.DECIMAL,
+                location=OpenApiParameter.QUERY,
                 description='Maximum balance',
                 examples=[
                     OpenApiExample(
@@ -260,9 +304,9 @@ class WalletViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='created_at_after', 
-                type=OpenApiTypes.DATETIME, 
-                location=OpenApiParameter.QUERY, 
+                name='created_at_after',
+                type=OpenApiTypes.DATETIME,
+                location=OpenApiParameter.QUERY,
                 description='Created at (start range)',
                 examples=[
                     OpenApiExample(
@@ -272,9 +316,9 @@ class WalletViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='created_at_before', 
-                type=OpenApiTypes.DATETIME, 
-                location=OpenApiParameter.QUERY, 
+                name='created_at_before',
+                type=OpenApiTypes.DATETIME,
+                location=OpenApiParameter.QUERY,
                 description='Created at (end range)',
                 examples=[
                     OpenApiExample(
@@ -286,7 +330,14 @@ class WalletViewSet(BaseServiceViewSet):
         ],
     )
     def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
+        set_logging_context(user_id=request.user.id)
+        try:
+            response = super().list(request, *args, **kwargs)
+            return response
+        except Exception as e:
+            logger.error(f"Failed to list wallets: {str(e)}", extra={'user_id': request.user.id})
+            raise
+
 
 class TransactionViewSet(BaseServiceViewSet):
     """
@@ -307,6 +358,7 @@ class TransactionViewSet(BaseServiceViewSet):
         Returns:
             QuerySet: Filtered transactions (all for staff, user-related otherwise).
         """
+        set_logging_context(user_id=self.request.user.id)
         queryset = Transaction.objects.select_related('wallet', 'wallet__user', 'related_wallet', 'related_wallet__user').all().order_by('-created_at')
         if not self.request.user.is_staff:
             return queryset.filter(Q(wallet__user=self.request.user))
@@ -323,22 +375,39 @@ class TransactionViewSet(BaseServiceViewSet):
         Returns:
             Response: Success message or error details.
         """
+        set_logging_context(user_id=request.user.id)
+        
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         action = serializer.validated_data['action']
         reference = serializer.validated_data['reference']
-
-        sender_tx = self._get_transaction(reference, Transaction.TransactionTypes.TRANSFER_OUT)
-        recipient_tx = self._get_transaction(reference, Transaction.TransactionTypes.TRANSFER_IN)
-        message = 'Transaction accepted' if action == 'accept' else 'Transaction rejected'
-        self.transaction_service.execute(
-            action=action,
-            sender_transaction=sender_tx,
-            recipient_transaction=recipient_tx,
-            user=request.user
+        logger.info(
+            f"Processing transaction {action}", 
+            extra={'user_id': request.user.id, 'transaction_ref': reference}
         )
-        return Response({'message': message}, status=status.HTTP_200_OK)
+
+        try:
+            sender_tx = self._get_transaction(reference, Transaction.TransactionTypes.TRANSFER_OUT)
+            recipient_tx = self._get_transaction(reference, Transaction.TransactionTypes.TRANSFER_IN)
+            self.transaction_service.execute(
+                action=action,
+                sender_transaction=sender_tx,
+                recipient_transaction=recipient_tx,
+                user=request.user
+            )
+            logger.info(
+                f"Transaction {action} successful", 
+                extra={'user_id': request.user.id, 'transaction_ref': reference}
+            )
+            message = 'Transaction accepted' if action == 'accept' else 'Transaction rejected'
+            return Response({'message': message}, status=status.HTTP_200_OK)
+        except CustomValidationError as e:
+            logger.error(
+                f"Transaction {action} failed: {str(e)}", 
+                extra={'user_id': request.user.id, 'transaction_ref': reference}
+            )
+            raise
 
     def _get_transaction(self, reference, transaction_type):
         """
@@ -357,14 +426,18 @@ class TransactionViewSet(BaseServiceViewSet):
         try:
             return Transaction.objects.get(reference=reference, transaction_type=transaction_type)
         except Transaction.DoesNotExist:
+            logger.error(
+                f"Transaction not found", 
+                extra={'user_id': self.request.user.id, 'transaction_ref': reference, 'type': transaction_type}
+            )
             raise CustomValidationError("Transaction not found or not yours")
-    
+
     @extend_schema(
         parameters=[
             OpenApiParameter(
                 name='sender',
-                type=OpenApiTypes.STR, 
-                location=OpenApiParameter.QUERY, 
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
                 description='Sender username (exact match)',
                 examples=[
                     OpenApiExample(
@@ -374,9 +447,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='recipient', 
-                type=OpenApiTypes.STR, 
-                location=OpenApiParameter.QUERY, 
+                name='recipient',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
                 description='Recipient username (exact match)',
                 examples=[
                     OpenApiExample(
@@ -386,9 +459,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='involving_user', 
-                type=OpenApiTypes.STR, 
-                location=OpenApiParameter.QUERY, 
+                name='involving_user',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
                 description='Transactions involving user as sender or recipient',
                 examples=[
                     OpenApiExample(
@@ -398,9 +471,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='amount_min', 
-                type=OpenApiTypes.DECIMAL, 
-                location=OpenApiParameter.QUERY, 
+                name='amount_min',
+                type=OpenApiTypes.DECIMAL,
+                location=OpenApiParameter.QUERY,
                 description='Minimum amount',
                 examples=[
                     OpenApiExample(
@@ -410,9 +483,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='amount_max', 
-                type=OpenApiTypes.DECIMAL, 
-                location=OpenApiParameter.QUERY, 
+                name='amount_max',
+                type=OpenApiTypes.DECIMAL,
+                location=OpenApiParameter.QUERY,
                 description='Maximum amount',
                 examples=[
                     OpenApiExample(
@@ -422,9 +495,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='transaction_type', 
-                type=OpenApiTypes.STR, 
-                location=OpenApiParameter.QUERY, 
+                name='transaction_type',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
                 description='Transaction type',
                 examples=[
                     OpenApiExample(
@@ -434,9 +507,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='funding_source', 
-                type=OpenApiTypes.STR, 
-                location=OpenApiParameter.QUERY, 
+                name='funding_source',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
                 description='Funding source',
                 examples=[
                     OpenApiExample(
@@ -446,9 +519,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='status', 
-                type=OpenApiTypes.STR, 
-                location=OpenApiParameter.QUERY, 
+                name='status',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
                 description='Status of the transaction',
                 examples=[
                     OpenApiExample(
@@ -458,9 +531,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='reference', 
-                type=OpenApiTypes.STR, 
-                location=OpenApiParameter.QUERY, 
+                name='reference',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
                 description='Partial or full reference text',
                 examples=[
                     OpenApiExample(
@@ -470,9 +543,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='created_at_after', 
-                type=OpenApiTypes.DATETIME, 
-                location=OpenApiParameter.QUERY, 
+                name='created_at_after',
+                type=OpenApiTypes.DATETIME,
+                location=OpenApiParameter.QUERY,
                 description='Created at (start range)',
                 examples=[
                     OpenApiExample(
@@ -482,9 +555,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='created_at_before', 
-                type=OpenApiTypes.DATETIME, 
-                location=OpenApiParameter.QUERY, 
+                name='created_at_before',
+                type=OpenApiTypes.DATETIME,
+                location=OpenApiParameter.QUERY,
                 description='Created at (end range)',
                 examples=[
                     OpenApiExample(
@@ -494,9 +567,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='expiry_time_after', 
-                type=OpenApiTypes.DATETIME, 
-                location=OpenApiParameter.QUERY, 
+                name='expiry_time_after',
+                type=OpenApiTypes.DATETIME,
+                location=OpenApiParameter.QUERY,
                 description='Expiry time (start range)',
                 examples=[
                     OpenApiExample(
@@ -506,9 +579,9 @@ class TransactionViewSet(BaseServiceViewSet):
                 ]
             ),
             OpenApiParameter(
-                name='expiry_time_before', 
-                type=OpenApiTypes.DATETIME, 
-                location=OpenApiParameter.QUERY, 
+                name='expiry_time_before',
+                type=OpenApiTypes.DATETIME,
+                location=OpenApiParameter.QUERY,
                 description='Expiry time (end range)',
                 examples=[
                     OpenApiExample(
@@ -520,6 +593,7 @@ class TransactionViewSet(BaseServiceViewSet):
         ]
     )
     def list(self, request, *args, **kwargs):
+        set_logging_context(user_id=request.user.id)
         user_id = request.user.id
         page = request.query_params.get('page', '1')
         page_size = request.query_params.get('page_size', self.pagination_class.page_size)
@@ -529,30 +603,46 @@ class TransactionViewSet(BaseServiceViewSet):
         if cached_data is not None:
             return Response(cached_data)
 
-        queryset = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            data = self.get_paginated_response(serializer.data).data
-        else:
-            serializer = self.get_serializer(queryset, many=True)
-            data = serializer.data
+        try:
+            queryset = self.filter_queryset(self.get_queryset())
+            page = self.paginate_queryset(queryset)
+            if page is not None:
+                serializer = self.get_serializer(page, many=True)
+                data = self.get_paginated_response(serializer.data).data
+            else:
+                serializer = self.get_serializer(queryset, many=True)
+                data = serializer.data
 
-        cache.set(cache_key, data, timeout=CACHE_TIMEOUT)
-        return Response(data)
-
+            cache.set(cache_key, data, timeout=settings.CACHE_TIMEOUT)
+            return Response(data)
+        except Exception as e:
+            logger.error(f"Failed to list transactions: {str(e)}", extra={'user_id': user_id})
+            raise
 
 
 class BaseWebhookView(GenericAPIView):
+    """Base view for webhook handling."""
+
     throttle_scope = 'wallet'
 
     def __init__(self, wallet_service=None, *args, **kwargs):
+        """
+        Initialize the webhook view with wallet service.
+
+        Args:
+            wallet_service: Optional WalletService instance (for testing/mocking).
+            *args: Variable length argument list.
+            **kwargs: Arbitrary keyword arguments.
+        """
         super().__init__(*args, **kwargs)
         factory = WalletServiceFactory()
         self.wallet_service = wallet_service or factory.create_wallet_service()
 
+
 @method_decorator(csrf_exempt, name='dispatch')
 class PaysendWebhookView(BaseWebhookView, IdempotencyMixin):
+    """View for processing Paysend webhook payloads."""
+
     permission_classes = [AllowAny]
     serializer_class = PaysendWebhookSerializer
 
@@ -566,37 +656,112 @@ class PaysendWebhookView(BaseWebhookView, IdempotencyMixin):
         Returns:
             Response: Processing status or error details.
         """
+        transaction_id = request.headers.get('X-Paysend-Transaction-Id', 'N/A')
+        set_logging_context(transaction_ref=transaction_id)
+        logger.info("Paysend webhook received", extra={'transaction_ref': transaction_id})
+        
         def process_paysend_webhook(request, *args, **kwargs):
-            if request.META.get('REMOTE_ADDR') not in settings.IP_WHITELIST:
+            remote_addr = request.META.get('REMOTE_ADDR')
+            
+            # Authentication checks
+            if remote_addr not in settings.IP_WHITELIST:
+                logger.warning(
+                    f"Unauthorized webhook access from {remote_addr}",
+                    extra={'transaction_ref': transaction_id}
+                )
                 return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+            
             if not self._verify_signature(request.body, request.headers.get('X-Paysend-Signature', '')):
+                logger.error(
+                    "Invalid webhook signature",
+                    extra={'transaction_ref': transaction_id}
+                )
                 return Response({'detail': 'Invalid signature'}, status=status.HTTP_401_UNAUTHORIZED)
 
-            payload = self._parse_payload(request.body)
-            if payload.get('status') != 'COMPLETED':
-                return Response({'status': 'ignored'}, status=status.HTTP_200_OK)
+            try:
+                payload = self._parse_payload(request.body)
+                
+                # Skip non-completed transactions
+                if payload.get('status') != 'COMPLETED':
+                    logger.info(
+                        f"Ignoring {payload.get('status')} webhook",
+                        extra={'transaction_ref': payload.get('transactionId', 'N/A')}
+                    )
+                    return Response({'status': 'ignored'}, status=status.HTTP_200_OK)
 
-            wallet, amount, reference = self._extract_transaction_data(payload)
-            transaction = self._process_deposit(wallet, amount, reference)
-            return Response(
-                {'status': 'processed', 'transaction_id': transaction.id},
-                status=status.HTTP_200_OK
-            )
+                # Process the deposit
+                wallet, amount, reference = self._extract_transaction_data(payload)
+                set_logging_context(user_id=wallet.user.id, transaction_ref=reference)
+                transaction = self._process_deposit(wallet, amount, reference)
+                
+                logger.info(
+                    "Webhook processed successfully",
+                    extra={
+                        'user_id': wallet.user.id, 
+                        'transaction_ref': reference,
+                        'amount': str(amount)
+                    }
+                )
+                return Response(
+                    {'status': 'processed', 'transaction_id': transaction.id},
+                    status=status.HTTP_200_OK
+                )
+            except CustomValidationError as e:
+                logger.error(
+                    f"Webhook processing failed: {str(e)}",
+                    extra={'transaction_ref': transaction_id}
+                )
+                raise
 
         return self.enforce_idempotency(request, process_paysend_webhook)
 
     def _verify_signature(self, payload, signature):
+        """
+        Verify the webhook signature.
+
+        Args:
+            payload: Raw payload bytes.
+            signature: Signature from request headers.
+
+        Returns:
+            bool: True if signature is valid.
+        """
         secret = settings.PAYSEND_WEBHOOK_SECRET.encode()
         expected = hmac.new(secret, msg=payload, digestmod=hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, signature)
 
     def _parse_payload(self, body):
+        """
+        Parse the webhook payload.
+
+        Args:
+            body: Raw payload bytes.
+
+        Returns:
+            dict: Parsed payload.
+
+        Raises:
+            CustomValidationError: If payload is invalid.
+        """
         try:
             return json.loads(body.decode('utf-8'))
         except (ValueError, KeyError) as e:
+            logger.error(f"Invalid payload format: {str(e)}")
             raise CustomValidationError(f"Invalid payload: {str(e)}")
 
     def _extract_transaction_data(self, payload):
+        """
+        Extract transaction data from payload.
+
+        Args:
+            payload: Parsed webhook payload.
+
+        Returns:
+            tuple: (wallet, amount, reference).
+
+        Raises:
+            CustomValidationError: If data is invalid.
+        """
         try:
             phone_number = payload['recipient']['phone_number']
             amount = Decimal(payload['recipient']['amount'])
@@ -604,20 +769,43 @@ class PaysendWebhookView(BaseWebhookView, IdempotencyMixin):
             wallet = get_object_or_404(Wallet, user__phone_number=phone_number)
             return wallet, amount, reference
         except (KeyError, ValueError) as e:
+            logger.error(f"Invalid transaction data structure: {str(e)}")
             raise CustomValidationError(f"Invalid transaction data: {str(e)}")
 
     def _process_deposit(self, wallet, amount, reference):
-        return self.wallet_service.process(
-            process_type='deposit',
-            wallet=wallet,
-            amount=amount,
-            funding_source=Transaction.FundingSource.PAYSEND,
-            reference=reference
-        )
+        """
+        Process a deposit from the webhook.
+
+        Args:
+            wallet: Wallet to deposit to.
+            amount: Deposit amount.
+            reference: Transaction reference.
+
+        Returns:
+            Transaction: Created transaction object.
+        """
+        set_logging_context(user_id=wallet.user.id, transaction_ref=reference)
+        try:
+            transaction = self.wallet_service.process(
+                process_type='deposit',
+                wallet=wallet,
+                amount=amount,
+                funding_source=Transaction.FundingSource.PAYSEND,
+                reference=reference
+            )
+            return transaction
+        except Exception as e:
+            logger.error(
+                f"Deposit processing failed: {str(e)}",
+                extra={'user_id': wallet.user.id, 'transaction_ref': reference}
+            )
+            raise
 
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CashOutVerifyView(BaseWebhookView, IdempotencyMixin):
+    """View for verifying cash-out requests."""
+
     permission_classes = [AllowAny]
     serializer_class = CashOutVerifySerializer
 
@@ -631,18 +819,37 @@ class CashOutVerifyView(BaseWebhookView, IdempotencyMixin):
         Returns:
             Response: Approval details or error message.
         """
+        logger.info("Cash-out verification request received")
+        
         def process_cashout_verify(request, *args, **kwargs):
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
 
             phone_number = serializer.validated_data['phone_number']
             withdrawal_code = serializer.validated_data['withdrawal_code']
+            reference = f"BLF-ATM-{withdrawal_code}"
+            set_logging_context(transaction_ref=reference)
 
-            if request.META.get('REMOTE_ADDR') not in settings.IP_WHITELIST:
+            # IP whitelist check
+            remote_addr = request.META.get('REMOTE_ADDR')
+            if remote_addr not in settings.IP_WHITELIST:
+                logger.warning(
+                    f"Unauthorized verification from {remote_addr}",
+                    extra={'transaction_ref': reference}
+                )
                 return Response({'detail': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
 
             try:
                 transaction = self.wallet_service.verify_cash_out(phone_number, withdrawal_code)
+                user_id = transaction.wallet.user.id if transaction.wallet else 'N/A'
+                logger.info(
+                    "Cash-out verified",
+                    extra={
+                        'user_id': user_id,
+                        'transaction_ref': reference,
+                        'amount': str(abs(transaction.amount))
+                    }
+                )
                 return Response(
                     {
                         'status': 'approved',
@@ -652,8 +859,16 @@ class CashOutVerifyView(BaseWebhookView, IdempotencyMixin):
                     status=status.HTTP_200_OK
                 )
             except CustomValidationError as e:
+                logger.error(
+                    f"Verification failed: {str(e)}",
+                    extra={'transaction_ref': reference}
+                )
                 return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
             except Transaction.DoesNotExist:
+                logger.error(
+                    f"Invalid withdrawal code ({withdrawal_code}) or phone ({phone_number})",
+                    extra={'transaction_ref': reference}
+                )
                 return Response(
                     {'detail': 'Invalid withdrawal code or phone number'},
                     status=status.HTTP_404_NOT_FOUND

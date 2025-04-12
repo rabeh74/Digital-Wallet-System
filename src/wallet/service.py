@@ -1,6 +1,8 @@
 """
-Service layer for wallet and transaction operations, implementing repository,
-strategy, and command patterns for modularity and consistency.
+Service layer for wallet and transaction operations.
+
+This module implements repository, strategy, and command patterns for modularity
+and consistency, with logging for key operations and errors.
 """
 
 from abc import ABC, abstractmethod
@@ -8,13 +10,17 @@ import uuid
 from datetime import timedelta
 from django.db import transaction as db_transaction
 from django.utils import timezone
+import logging
 
 from .models import Wallet, Transaction
 from .notifications import NotificationService
 from .exceptions import CustomValidationError
+from .utils import set_logging_context
+
 # Configuration constants
 CASH_OUT_EXPIRY_MINUTES = 30
 
+logger = logging.getLogger('wallet.service')
 
 class IWalletRepository(ABC):
     """Repository interface for wallet operations."""
@@ -69,7 +75,13 @@ class WalletRepository(IWalletRepository):
         Returns:
             Wallet: Wallet object or None if not found.
         """
-        return Wallet.objects.filter(user=user).first()
+        set_logging_context(user_id=user.id)
+        wallet = Wallet.objects.filter(user=user).first()
+        logger.debug(
+            f"Wallet {'found' if wallet else 'not found'}",
+            extra={'user_id': user.id ,'wallet_id': wallet.id if wallet else None}
+        )
+        return wallet
 
     def get_or_create(self, user):
         """
@@ -82,11 +94,17 @@ class WalletRepository(IWalletRepository):
             tuple: (Wallet object, created boolean).
 
         Raises:
-            ValidationError: If wallet creation fails.
+            CustomValidationError: If wallet creation fails.
         """
+        set_logging_context(user_id=user.id)
         try:
-            return Wallet.objects.get_or_create(user=user)
+            wallet, created = Wallet.objects.get_or_create(user=user)
+            return wallet, created
         except Exception as e:
+            logger.error(
+                f"Failed to get or create wallet: {str(e)}",
+                extra={'user_id': user.id}
+            )
             raise CustomValidationError(f"Failed to get or create wallet: {str(e)}")
 
     def update_balance(self, wallet, amount):
@@ -100,9 +118,25 @@ class WalletRepository(IWalletRepository):
         Returns:
             Wallet: Updated wallet object.
         """
-        wallet.balance += amount
-        wallet.save(update_fields=['balance'])
-        return wallet
+        set_logging_context(user_id=wallet.user.id)
+        logger.info(
+            f"Updating wallet balance by {amount}",
+            extra={'user_id': wallet.user.id, 'wallet_id': wallet.id ,'amount': amount}
+        )
+        try:
+            wallet.balance += amount
+            wallet.save(update_fields=['balance'])
+            logger.debug(
+                f"Wallet balance updated to {wallet.balance}",
+                extra={'user_id': wallet.user.id, 'wallet_id': wallet.id ,'amount': amount}
+            )
+            return wallet
+        except Exception as e:
+            logger.error(
+                f"Failed to update wallet balance: {str(e)}",
+                extra={'user_id': wallet.user.id, 'wallet_id': wallet.id ,'amount': amount}
+            )
+            raise
 
 
 class TransactionRepository(ITransactionRepository):
@@ -118,7 +152,22 @@ class TransactionRepository(ITransactionRepository):
         Returns:
             Transaction: Created transaction object.
         """
-        return Transaction.objects.create(**kwargs)
+        user_id = kwargs.get('wallet').user.id if kwargs.get('wallet') else 'N/A'
+        reference = kwargs.get('reference', 'N/A')
+        set_logging_context(user_id=user_id, transaction_ref=reference)
+        try:
+            transaction = Transaction.objects.create(**kwargs)
+            logger.info(
+                "Transaction created",
+                extra={'user_id': user_id, 'transaction_ref': transaction.reference ,'wallet_id': kwargs['wallet'].id ,'amount': kwargs.get('amount')}
+            )
+            return transaction
+        except Exception as e:
+            logger.error(
+                f"Failed to create transaction: {str(e)}",
+                extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['wallet'].id ,'amount': kwargs.get('amount')}
+            )
+            raise
 
     def get_by_reference_and_wallet(self, reference, wallet):
         """
@@ -131,7 +180,9 @@ class TransactionRepository(ITransactionRepository):
         Returns:
             Transaction: Transaction object or None if not found.
         """
-        return Transaction.objects.filter(reference=reference, wallet=wallet).first()
+             
+        transaction = Transaction.objects.filter(reference=reference, wallet=wallet).first()
+        return transaction
 
     def get_by_id(self, transaction_id):
         """
@@ -143,9 +194,13 @@ class TransactionRepository(ITransactionRepository):
         Returns:
             Transaction: Transaction object.
 
+        Raises:
+            CustomValidationError: If transaction not found.
         """
+        
         try:
-            return Transaction.objects.get(id=transaction_id)
+            transaction = Transaction.objects.get(id=transaction_id)
+            return transaction
         except Transaction.DoesNotExist:
             raise CustomValidationError(f"Transaction {transaction_id} not found")
 
@@ -160,11 +215,12 @@ class TransactionRepository(ITransactionRepository):
         Returns:
             Transaction: Matching transaction or None if not found.
         """
-        return Transaction.objects.select_for_update().filter(
+        transaction = Transaction.objects.select_for_update().filter(
             wallet__user__phone_number=phone_number,
             reference__endswith=withdrawal_code,
             status=Transaction.Status.PENDING
         ).first()
+        return transaction
 
     def update_status(self, transaction, status):
         """
@@ -172,14 +228,23 @@ class TransactionRepository(ITransactionRepository):
 
         Args:
             transaction: Transaction object to update.
-            status: New     status value.
+            status: New status value.
 
         Returns:
             Transaction: Updated transaction object.
         """
-        transaction.status = status
-        transaction.save(update_fields=['status'])
-        return transaction
+        user_id = transaction.wallet.user.id if transaction.wallet else 'N/A'
+        
+        try:
+            transaction.status = status
+            transaction.save(update_fields=['status'])
+            return transaction
+        except Exception as e:
+            logger.error(
+                f"Failed to update transaction status: {str(e)}",
+                extra={'user_id': user_id, 'transaction_ref': transaction.reference ,'wallet_id': transaction.wallet.id ,'amount': transaction.amount}
+            )
+            raise
 
 
 class TransactionStrategy(ABC):
@@ -215,14 +280,34 @@ class DepositStrategy(TransactionStrategy):
 
         Returns:
             Transaction: Created transaction object.
-
         """
         reference = f"DEPOSIT-{uuid.uuid4().hex[:8]}"
-        with db_transaction.atomic():
-            self.wallet_repository.update_balance(kwargs['wallet'], kwargs['amount'])
-            transaction = self._create_transaction(kwargs['wallet'], kwargs['amount'], kwargs['funding_source'], reference)
-        self.notification_service.send_transaction_notification(kwargs['wallet'].user.email, transaction, 'deposit')
-        return transaction
+        user_id = kwargs['wallet'].user.id
+        set_logging_context(user_id=user_id, transaction_ref=reference)
+        logger.info(
+            f"Processing deposit of {kwargs['amount']}",
+            extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['wallet'].id ,'amount': kwargs.get('amount')}
+        )
+        try:
+            with db_transaction.atomic():
+                self.wallet_repository.update_balance(kwargs['wallet'], kwargs['amount'])
+                transaction = self._create_transaction(
+                    kwargs['wallet'], kwargs['amount'], kwargs['funding_source'], reference
+                )
+            logger.info(
+                "Deposit processed successfully",
+                extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['wallet'].id ,'amount': kwargs.get('amount')}
+            )
+            self.notification_service.send_transaction_notification(
+                kwargs['wallet'].user.email, transaction, 'deposit'
+            )
+            return transaction
+        except Exception as e:
+            logger.error(
+                f"Deposit failed: {str(e)}",
+                extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['wallet'].id ,'amount': kwargs.get('amount')}
+            )
+            raise
 
     def _create_transaction(self, wallet, amount, funding_source, reference):
         """
@@ -237,7 +322,8 @@ class DepositStrategy(TransactionStrategy):
         Returns:
             Transaction: Created transaction object.
         """
-        return self.transaction_repository.create(
+        set_logging_context(user_id=wallet.user.id, transaction_ref=reference)
+        transaction = self.transaction_repository.create(
             wallet=wallet,
             amount=amount,
             transaction_type=Transaction.TransactionTypes.DEPOSIT,
@@ -245,6 +331,11 @@ class DepositStrategy(TransactionStrategy):
             reference=reference,
             status=Transaction.Status.COMPLETED
         )
+        logger.debug(
+            "Deposit transaction created",
+            extra={'user_id': wallet.user.id, 'transaction_ref': reference ,'wallet_id': wallet.id ,'amount': amount}
+        )
+        return transaction
 
 
 class WithdrawalStrategy(TransactionStrategy):
@@ -274,18 +365,39 @@ class WithdrawalStrategy(TransactionStrategy):
             Transaction: Created transaction object.
         """
         reference = f"WITHDRAWAL-{uuid.uuid4().hex[:8]}"
-        with db_transaction.atomic():
-            self.wallet_repository.update_balance(kwargs['wallet'], -kwargs['amount'])
-            transaction = self._create_transaction(kwargs['wallet'], kwargs['amount'], kwargs['funding_source'], reference)
-        self.notification_service.send_transaction_notification(kwargs['wallet'].user.email, transaction, 'withdrawal')
-        return transaction
+        user_id = kwargs['wallet'].user.id
+        set_logging_context(user_id=user_id, transaction_ref=reference)
+        logger.info(
+            f"Processing withdrawal of {kwargs['amount']}",
+            extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['wallet'].id ,'amount': kwargs.get('amount')}
+        )
+        try:
+            with db_transaction.atomic():
+                self.wallet_repository.update_balance(kwargs['wallet'], -kwargs['amount'])
+                transaction = self._create_transaction(
+                    kwargs['wallet'], kwargs['amount'], kwargs['funding_source'], reference
+                )
+            logger.info(
+                "Withdrawal processed successfully",
+                extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['wallet'].id ,'amount': kwargs.get('amount')}
+            )
+            self.notification_service.send_transaction_notification(
+                kwargs['wallet'].user.email, transaction, 'withdrawal'
+            )
+            return transaction
+        except Exception as e:
+            logger.error(
+                f"Withdrawal failed: {str(e)}",
+                extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['wallet'].id ,'amount': kwargs.get('amount')}
+            )
+            raise
 
-    def _create_transaction(self, user, amount, funding_source, reference):
+    def _create_transaction(self, wallet, amount, funding_source, reference):
         """
         Create a withdrawal transaction.
 
         Args:
-            user: User initiating the withdrawal.
+            wallet: Wallet initiating the withdrawal.
             amount: Decimal amount.
             funding_source: Funding source enum.
             reference: Transaction reference string.
@@ -293,14 +405,24 @@ class WithdrawalStrategy(TransactionStrategy):
         Returns:
             Transaction: Created transaction object.
         """
-        return self.transaction_repository.create(
-            user=user,
+        set_logging_context(user_id=wallet.user.id, transaction_ref=reference)
+        logger.debug(
+            "Creating withdrawal transaction",
+            extra={'user_id': wallet.user.id, 'transaction_ref': reference ,'wallet_id': wallet.id ,'amount': amount}
+        )
+        transaction = self.transaction_repository.create(
+            wallet=wallet,
             amount=-amount,
             transaction_type=Transaction.TransactionTypes.WITHDRAWAL,
             funding_source=funding_source,
             reference=reference,
             status=Transaction.Status.COMPLETED
         )
+        logger.debug(
+            "Withdrawal transaction created",
+            extra={'user_id': wallet.user.id, 'transaction_ref': reference ,'wallet_id': wallet.id ,'amount': amount}
+        )
+        return transaction
 
 
 class TransferStrategy(TransactionStrategy):
@@ -330,11 +452,34 @@ class TransferStrategy(TransactionStrategy):
             str: Transaction reference.
         """
         reference = f"TRANSFER-{uuid.uuid4().hex[:8]}"
-        with db_transaction.atomic():
-            sender_transaction = self._process_sender_transaction(kwargs['wallet'], kwargs['recipient_wallet'], kwargs['amount'], reference)
-            recipient_transaction = self._process_recipient_transaction(kwargs['wallet'], kwargs['recipient_wallet'], kwargs['amount'], reference)
-        self._send_notifications(kwargs['wallet'].user, kwargs['recipient_wallet'].user, sender_transaction, recipient_transaction)
-        return reference
+        user_id = kwargs['wallet'].user.id
+        set_logging_context(user_id=user_id, transaction_ref=reference)
+        logger.info(
+            f"Processing transfer of {kwargs['amount']} to recipient wallet",
+            extra={'user_id': user_id, 'transaction_ref': reference}
+        )
+        try:
+            with db_transaction.atomic():
+                sender_transaction = self._process_sender_transaction(
+                    kwargs['wallet'], kwargs['recipient_wallet'], kwargs['amount'], reference
+                )
+                recipient_transaction = self._process_recipient_transaction(
+                    kwargs['wallet'], kwargs['recipient_wallet'], kwargs['amount'], reference
+                )
+            self._send_notifications(
+                kwargs['wallet'].user, kwargs['recipient_wallet'].user, sender_transaction, recipient_transaction
+            )
+            logger.info(
+                "Transfer processed successfully",
+                extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['wallet'].id ,'amount': kwargs.get('amount')}
+            )
+            return reference
+        except Exception as e:
+            logger.error(
+                f"Transfer failed: {str(e)}",
+                extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['wallet'].id ,'amount': kwargs.get('amount')}
+            )
+            raise
 
     def _process_sender_transaction(self, wallet, recipient_wallet, amount, reference):
         """
@@ -349,8 +494,13 @@ class TransferStrategy(TransactionStrategy):
         Returns:
             Transaction: Sender's transaction object.
         """
+        set_logging_context(user_id=wallet.user.id, transaction_ref=reference)
+        logger.debug(
+            "Processing sender transaction",
+            extra={'user_id': wallet.user.id, 'transaction_ref': reference ,'wallet_id': wallet.id ,'amount': amount}
+        )
         self.wallet_repository.update_balance(wallet, -amount)
-        return self.transaction_repository.create(
+        transaction = self.transaction_repository.create(
             wallet=wallet,
             related_wallet=recipient_wallet,
             amount=amount,
@@ -359,6 +509,11 @@ class TransferStrategy(TransactionStrategy):
             status=Transaction.Status.PENDING,
             reference=reference
         )
+        logger.debug(
+            "Sender transaction created",
+            extra={'user_id': wallet.user.id, 'transaction_ref': reference ,'wallet_id': wallet.id ,'amount': amount}
+        )
+        return transaction
 
     def _process_recipient_transaction(self, wallet, recipient_wallet, amount, reference):
         """
@@ -366,14 +521,19 @@ class TransferStrategy(TransactionStrategy):
 
         Args:
             wallet: Sender wallet instance.
-            recipient_user: Recipient user instance.
+            recipient_wallet: Recipient wallet instance.
             amount: Decimal amount to transfer.
             reference: Transaction reference string.
 
         Returns:
             Transaction: Recipient's transaction object.
         """
-        return self.transaction_repository.create(
+        set_logging_context(user_id=recipient_wallet.user.id, transaction_ref=reference)
+        logger.debug(
+            "Processing recipient transaction",
+            extra={'user_id': recipient_wallet.user.id, 'transaction_ref': reference ,'wallet_id': recipient_wallet.id ,'amount': amount}
+        )
+        transaction = self.transaction_repository.create(
             wallet=recipient_wallet,
             related_wallet=wallet,
             amount=amount,
@@ -382,6 +542,11 @@ class TransferStrategy(TransactionStrategy):
             status=Transaction.Status.PENDING,
             reference=reference
         )
+        logger.debug(
+            "Recipient transaction created",
+            extra={'user_id': recipient_wallet.user.id, 'transaction_ref': reference ,'wallet_id': recipient_wallet.id ,'amount': amount}
+        )
+        return transaction
 
     def _send_notifications(self, sender_user, recipient_user, sender_transaction, recipient_transaction):
         """
@@ -393,8 +558,21 @@ class TransferStrategy(TransactionStrategy):
             sender_transaction: Sender's transaction object.
             recipient_transaction: Recipient's transaction object.
         """
-        self.notification_service.send_transaction_notification(sender_user.email, sender_transaction, 'transfer_sent')
-        self.notification_service.send_transaction_notification(recipient_user.email, recipient_transaction, 'transfer_received')
+        set_logging_context(transaction_ref=sender_transaction.reference)
+        logger.debug(
+            "Sending transfer notifications",
+            extra={'user_id': sender_user.id, 'transaction_ref': sender_transaction.reference ,'wallet_id': sender_transaction.wallet.id ,'amount': sender_transaction.amount}
+        )
+        self.notification_service.send_transaction_notification(
+            sender_user.email, sender_transaction, 'transfer_sent'
+        )
+        self.notification_service.send_transaction_notification(
+            recipient_user.email, recipient_transaction, 'transfer_received'
+        )
+        logger.debug(
+            "Transfer notifications sent",
+            extra={'user_id': sender_user.id, 'transaction_ref': sender_transaction.reference ,'wallet_id': sender_transaction.wallet.id ,'amount': sender_transaction.amount}
+        )
 
 
 class TransactionCommand(ABC):
@@ -429,13 +607,30 @@ class AcceptTransactionCommand(TransactionCommand):
             **kwargs: Command arguments (sender_transaction, recipient_transaction, user).
 
         Raises:
-            InvalidTransactionError: If transaction is invalid or not owned by user.
+            CustomValidationError: If transaction is invalid or not owned by user.
         """
-        with db_transaction.atomic():
-            self._credit_recipient(kwargs['recipient_transaction'])
-            self._complete_transactions(kwargs['sender_transaction'], kwargs['recipient_transaction'])
-            self._notify_users(kwargs['sender_transaction'], kwargs['recipient_transaction'])
-
+        reference = kwargs['sender_transaction'].reference
+        user_id = kwargs['recipient_transaction'].wallet.user.id
+        set_logging_context(user_id=user_id, transaction_ref=reference)
+        logger.info(
+            "Executing accept command",
+            extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['sender_transaction'].wallet.id ,'amount': kwargs['sender_transaction'].amount}
+        )
+        try:
+            with db_transaction.atomic():
+                self._credit_recipient(kwargs['recipient_transaction'])
+                self._complete_transactions(kwargs['sender_transaction'], kwargs['recipient_transaction'])
+                self._notify_users(kwargs['sender_transaction'], kwargs['recipient_transaction'])
+            logger.info(
+                "Accept command executed successfully",
+                extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['sender_transaction'].wallet.id ,'amount': kwargs['sender_transaction'].amount}
+            )
+        except Exception as e:
+            logger.error(
+                f"Accept command failed: {str(e)}",
+                extra={'user_id': user_id, 'transaction_ref': reference ,'wallet_id': kwargs['sender_transaction'].wallet.id ,'amount': kwargs['sender_transaction'].amount}
+            )
+            raise
 
     def _credit_recipient(self, recipient_transaction):
         """
@@ -444,9 +639,18 @@ class AcceptTransactionCommand(TransactionCommand):
         Args:
             recipient_transaction: Recipient's transaction object.
         """
-        recipient_wallet = recipient_transaction.wallet
-        self.wallet_repository.update_balance(recipient_wallet, abs(recipient_transaction.amount))
+        user_id = recipient_transaction.wallet.user.id
+        set_logging_context(user_id=user_id, transaction_ref=recipient_transaction.reference)
+        logger.debug(
+            "Crediting recipient wallet",
+            extra={'user_id': user_id, 'transaction_ref': recipient_transaction.reference ,'wallet_id': recipient_transaction.wallet.id ,'amount': recipient_transaction.amount}
+        )
+        self.wallet_repository.update_balance(recipient_transaction.wallet, abs(recipient_transaction.amount))
         self.transaction_repository.update_status(recipient_transaction, Transaction.Status.ACCEPTED)
+        logger.debug(
+            "Recipient wallet credited",
+            extra={'user_id': user_id, 'transaction_ref': recipient_transaction.reference ,'wallet_id': recipient_transaction.wallet.id ,'amount': recipient_transaction.amount}
+        )
 
     def _complete_transactions(self, sender_transaction, recipient_transaction):
         """
@@ -456,8 +660,18 @@ class AcceptTransactionCommand(TransactionCommand):
             sender_transaction: Sender's transaction object.
             recipient_transaction: Recipient's transaction object.
         """
+        user_id = recipient_transaction.wallet.user.id
+        set_logging_context(user_id=user_id, transaction_ref=sender_transaction.reference)
+        logger.debug(
+            "Completing transactions",
+            extra={'user_id': user_id, 'transaction_ref': sender_transaction.reference}
+        )
         self.transaction_repository.update_status(sender_transaction, Transaction.Status.COMPLETED)
         self.transaction_repository.update_status(recipient_transaction, Transaction.Status.COMPLETED)
+        logger.debug(
+            "Transactions completed",
+            extra={'user_id': user_id, 'transaction_ref': sender_transaction.reference ,'wallet_id': sender_transaction.wallet.id ,'amount': sender_transaction.amount}
+        )
 
     def _notify_users(self, sender_transaction, recipient_transaction):
         """
@@ -467,8 +681,22 @@ class AcceptTransactionCommand(TransactionCommand):
             sender_transaction: Sender's transaction object.
             recipient_transaction: Recipient's transaction object.
         """
-        self.notification_service.send_transaction_notification(sender_transaction.wallet.user.email, sender_transaction, 'transfer_accepted')
-        self.notification_service.send_transaction_notification(recipient_transaction.wallet.user.email, recipient_transaction, 'transfer_accepted')
+        user_id = recipient_transaction.wallet.user.id
+        set_logging_context(user_id=user_id, transaction_ref=sender_transaction.reference)
+        logger.debug(
+            "Notifying users of accepted transfer",
+            extra={'user_id': user_id, 'transaction_ref': sender_transaction.reference ,'wallet_id': sender_transaction.wallet.id ,'amount': sender_transaction.amount}
+        )
+        self.notification_service.send_transaction_notification(
+            sender_transaction.wallet.user.email, sender_transaction, 'transfer_accepted'
+        )
+        self.notification_service.send_transaction_notification(
+            recipient_transaction.wallet.user.email, recipient_transaction, 'transfer_accepted'
+        )
+        logger.debug(
+            "Users notified of accepted transfer",
+            extra={'user_id': user_id, 'transaction_ref': sender_transaction.reference ,'wallet_id': sender_transaction.wallet.id ,'amount': sender_transaction.amount}
+        )
 
 
 class RejectTransactionCommand(TransactionCommand):
@@ -493,13 +721,29 @@ class RejectTransactionCommand(TransactionCommand):
 
         Args:
             **kwargs: Command arguments (sender_transaction, recipient_transaction, user).
-
         """
-        with db_transaction.atomic():
-            self._refund_sender(kwargs['sender_transaction'])
-            self._reject_transactions(kwargs['sender_transaction'], kwargs['recipient_transaction'])
-            self._notify_users(kwargs['sender_transaction'], kwargs['recipient_transaction'])
-
+        reference = kwargs['sender_transaction'].reference
+        user_id = kwargs['recipient_transaction'].wallet.user.id
+        set_logging_context(user_id=user_id, transaction_ref=reference)
+        logger.info(
+            "Executing reject command",
+            extra={'user_id': user_id, 'transaction_ref': reference}
+        )
+        try:
+            with db_transaction.atomic():
+                self._refund_sender(kwargs['sender_transaction'])
+                self._reject_transactions(kwargs['sender_transaction'], kwargs['recipient_transaction'])
+                self._notify_users(kwargs['sender_transaction'], kwargs['recipient_transaction'])
+            logger.info(
+                "Reject command executed successfully",
+                extra={'user_id': user_id, 'transaction_ref': reference}
+            )
+        except Exception as e:
+            logger.error(
+                f"Reject command failed: {str(e)}",
+                extra={'user_id': user_id, 'transaction_ref': reference}
+            )
+            raise
 
     def _refund_sender(self, sender_transaction):
         """
@@ -508,9 +752,18 @@ class RejectTransactionCommand(TransactionCommand):
         Args:
             sender_transaction: Sender's transaction object.
         """
-        sender_wallet = sender_transaction.wallet
-        self.wallet_repository.update_balance(sender_wallet, abs(sender_transaction.amount))
+        user_id = sender_transaction.wallet.user.id
+        set_logging_context(user_id=user_id, transaction_ref=sender_transaction.reference)
+        logger.debug(
+            "Refunding sender wallet",
+            extra={'user_id': user_id, 'transaction_ref': sender_transaction.reference}
+        )
+        self.wallet_repository.update_balance(sender_transaction.wallet, abs(sender_transaction.amount))
         self.transaction_repository.update_status(sender_transaction, Transaction.Status.REJECTED)
+        logger.debug(
+            "Sender wallet refunded",
+            extra={'user_id': user_id, 'transaction_ref': sender_transaction.reference}
+        )
 
     def _reject_transactions(self, sender_transaction, recipient_transaction):
         """
@@ -520,8 +773,18 @@ class RejectTransactionCommand(TransactionCommand):
             sender_transaction: Sender's transaction object.
             recipient_transaction: Recipient's transaction object.
         """
+        user_id = recipient_transaction.wallet.user.id
+        set_logging_context(user_id=user_id, transaction_ref=sender_transaction.reference)
+        logger.debug(
+            "Rejecting transactions",
+            extra={'user_id': user_id, 'transaction_ref': sender_transaction.reference}
+        )
         self.transaction_repository.update_status(sender_transaction, Transaction.Status.REJECTED)
         self.transaction_repository.update_status(recipient_transaction, Transaction.Status.REJECTED)
+        logger.debug(
+            "Transactions rejected",
+            extra={'user_id': user_id, 'transaction_ref': sender_transaction.reference}
+        )
 
     def _notify_users(self, sender_transaction, recipient_transaction):
         """
@@ -531,8 +794,22 @@ class RejectTransactionCommand(TransactionCommand):
             sender_transaction: Sender's transaction object.
             recipient_transaction: Recipient's transaction object.
         """
-        self.notification_service.send_transaction_notification(sender_transaction.wallet.user.email, sender_transaction, 'transfer_rejected')
-        self.notification_service.send_transaction_notification(recipient_transaction.wallet.user.email, recipient_transaction, 'transfer_rejected')
+        user_id = recipient_transaction.wallet.user.id
+        set_logging_context(user_id=user_id, transaction_ref=sender_transaction.reference)
+        logger.debug(
+            "Notifying users of rejected transfer",
+            extra={'user_id': user_id, 'transaction_ref': sender_transaction.reference}
+        )
+        self.notification_service.send_transaction_notification(
+            sender_transaction.wallet.user.email, sender_transaction, 'transfer_rejected'
+        )
+        self.notification_service.send_transaction_notification(
+            recipient_transaction.wallet.user.email, recipient_transaction, 'transfer_rejected'
+        )
+        logger.debug(
+            "Users notified of rejected transfer",
+            extra={'user_id': user_id, 'transaction_ref': sender_transaction.reference}
+        )
 
 
 class WalletService:
@@ -567,8 +844,17 @@ class WalletService:
         Returns:
             Wallet: Wallet object.
         """
-        wallet, created = self.wallet_repository.get_or_create(user)
-        return wallet
+        set_logging_context(user_id=user.id)
+        try:
+            wallet, created = self.wallet_repository.get_or_create(user)
+            logger.info(
+                f"Wallet {'created' if created else 'retrieved'}",
+                extra={'user_id': user.id, 'wallet_id': wallet.id}
+            )
+            return wallet
+        except CustomValidationError as e:
+            logger.error(f"Failed to create wallet: {str(e)}", extra={'user_id': user.id})
+            raise
 
     def process(self, **kwargs):
         """
@@ -580,7 +866,30 @@ class WalletService:
         Returns:
             Transaction or str: Transaction object or reference, depending on strategy.
         """
-        return self.strategies[kwargs['process_type']].process(**kwargs)
+        process_type = kwargs.get('process_type')
+        user_id = kwargs.get('wallet').user.id if kwargs.get('wallet') else 'N/A'
+        reference = kwargs.get('reference', 'N/A')
+        set_logging_context(user_id=user_id, transaction_ref=reference)
+        logger.info(
+            f"Processing {process_type} transaction",
+            extra={'user_id': user_id, 'transaction_ref': reference}
+        )
+        try:
+            result = self.strategies[process_type].process(**kwargs)
+            logger.info(
+                f"{process_type.capitalize()} transaction processed successfully",
+                extra={
+                    'user_id': user_id,
+                    'transaction_ref': result if isinstance(result, str) else result.reference
+                }
+            )
+            return result
+        except Exception as e:
+            logger.error(
+                f"Failed to process {process_type} transaction: {str(e)}",
+                extra={'user_id': user_id, 'transaction_ref': reference}
+            )
+            raise
 
     def request_cash_out(self, wallet, amount):
         """
@@ -593,19 +902,36 @@ class WalletService:
         Returns:
             str: Withdrawal code.
         """
-
-        withdrawal_code = str(uuid.uuid4().hex[:8]).upper()
-        transaction = self.transaction_repository.create(
-            wallet=wallet,
-            amount=amount,
-            transaction_type=Transaction.TransactionTypes.WITHDRAWAL,
-            funding_source=Transaction.FundingSource.BLF_ATM,
-            reference=f"BLF-ATM-{withdrawal_code}",
-            status=Transaction.Status.PENDING,
-            expiry_time=timezone.now() + timedelta(minutes=CASH_OUT_EXPIRY_MINUTES)
+        set_logging_context(user_id=wallet.user.id)
+        logger.info(
+            f"Requesting cash-out of {amount} for wallet",
+            extra={'user_id': wallet.user.id, 'wallet_id': wallet.id}
         )
-        self.notification_service.send_transaction_notification(wallet.user.email, transaction, 'cash_out_requested')
-        return withdrawal_code
+        try:
+            withdrawal_code = str(uuid.uuid4().hex[:8]).upper()
+            transaction = self.transaction_repository.create(
+                wallet=wallet,
+                amount=amount,
+                transaction_type=Transaction.TransactionTypes.WITHDRAWAL,
+                funding_source=Transaction.FundingSource.BLF_ATM,
+                reference=f"BLF-ATM-{withdrawal_code}",
+                status=Transaction.Status.PENDING,
+                expiry_time=timezone.now() + timedelta(minutes=CASH_OUT_EXPIRY_MINUTES)
+            )
+            logger.info(
+                "Cash-out requested successfully",
+                extra={'user_id': wallet.user.id, 'transaction_ref': transaction.reference}
+            )
+            self.notification_service.send_transaction_notification(
+                wallet.user.email, transaction, 'cash_out_requested'
+            )
+            return withdrawal_code
+        except Exception as e:
+            logger.error(
+                f"Failed to request cash-out: {str(e)}",
+                extra={'user_id': wallet.user.id}
+            )
+            raise
 
     def verify_cash_out(self, phone_number, withdrawal_code):
         """
@@ -619,17 +945,48 @@ class WalletService:
             Transaction: Completed transaction object.
 
         Raises:
-            InvalidTransactionError: If code or phone number is invalid.
+            CustomValidationError: If code or phone number is invalid.
             ExpiredTransactionError: If code has expired.
             InsufficientFundsError: If wallet balance is insufficient.
         """
-        with db_transaction.atomic():
-            transaction = self.transaction_repository.get_by_withdrawal_code(phone_number, withdrawal_code)
-            wallet = transaction.wallet
-            self.wallet_repository.update_balance(wallet, -transaction.amount)
-            self.transaction_repository.update_status(transaction, Transaction.Status.COMPLETED)
-            self.notification_service.send_transaction_notification(wallet.user.email, transaction, 'cash_out_verified')
-            return transaction
+        reference = f"BLF-ATM-{withdrawal_code}"
+        set_logging_context(transaction_ref=reference)
+        logger.info(
+            f"Verifying cash-out with code {withdrawal_code} for phone {phone_number}",
+            extra={'transaction_ref': reference}
+        )
+        try:
+            with db_transaction.atomic():
+                transaction = self.transaction_repository.get_by_withdrawal_code(phone_number, withdrawal_code)
+                if not transaction:
+                    logger.error(
+                        "Invalid withdrawal code or phone number",
+                        extra={'transaction_ref': reference}
+                    )
+                    raise CustomValidationError("Invalid withdrawal code or phone number")
+                wallet = transaction.wallet
+                self.wallet_repository.update_balance(wallet, -transaction.amount)
+                self.transaction_repository.update_status(transaction, Transaction.Status.COMPLETED)
+                logger.info(
+                    "Cash-out verified successfully",
+                    extra={'user_id': wallet.user.id, 'transaction_ref': transaction.reference}
+                )
+                self.notification_service.send_transaction_notification(
+                    wallet.user.email, transaction, 'cash_out_verified'
+                )
+                return transaction
+        except CustomValidationError as e:
+            logger.error(
+                f"Cash-out verification failed: {str(e)}",
+                extra={'transaction_ref': reference}
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Unexpected error during cash-out verification: {str(e)}",
+                extra={'transaction_ref': reference}
+            )
+            raise
 
 
 class TransactionService:
@@ -662,7 +1019,27 @@ class TransactionService:
         Returns:
             Transaction: Transaction object.
         """
-        return self.transaction_repository.get_by_id(transaction_id)
+        set_logging_context(transaction_ref=transaction_id)
+        logger.info(
+            "Retrieving transaction",
+            extra={'transaction_ref': transaction_id}
+        )
+        try:
+            transaction = self.transaction_repository.get_by_id(transaction_id)
+            logger.info(
+                "Transaction retrieved",
+                extra={
+                    'user_id': transaction.wallet.user.id if transaction.wallet else 'N/A',
+                    'transaction_ref': transaction_id
+                }
+            )
+            return transaction
+        except CustomValidationError as e:
+            logger.error(
+                f"Failed to retrieve transaction: {str(e)}",
+                extra={'transaction_ref': transaction_id}
+            )
+            raise
 
     def execute(self, **kwargs):
         """
@@ -671,7 +1048,26 @@ class TransactionService:
         Args:
             **kwargs: Command arguments (action, sender_transaction, recipient_transaction, user).
         """
-        self.commands[kwargs['action']].execute(**kwargs)
+        action = kwargs['action']
+        reference = kwargs['sender_transaction'].reference
+        user_id = kwargs['recipient_transaction'].wallet.user.id
+        set_logging_context(user_id=user_id, transaction_ref=reference)
+        logger.info(
+            f"Executing {action} command",
+            extra={'user_id': user_id, 'transaction_ref': reference}
+        )
+        try:
+            self.commands[action].execute(**kwargs)
+            logger.info(
+                f"{action.capitalize()} command executed successfully",
+                extra={'user_id': user_id, 'transaction_ref': reference}
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to execute {action} command: {str(e)}",
+                extra={'user_id': user_id, 'transaction_ref': reference}
+            )
+            raise
 
 
 class WalletServiceFactory:
@@ -702,7 +1098,8 @@ class WalletServiceFactory:
             WalletService: Configured wallet service instance.
         """
         wallet_repo, transaction_repo, notification_service = WalletServiceFactory._create_repositories()
-        return WalletService(wallet_repo, transaction_repo, notification_service, strategies)
+        service = WalletService(wallet_repo, transaction_repo, notification_service, strategies)
+        return service
 
     @staticmethod
     def create_transaction_service():
@@ -713,4 +1110,5 @@ class WalletServiceFactory:
             TransactionService: Configured transaction service instance.
         """
         wallet_repo, transaction_repo, notification_service = WalletServiceFactory._create_repositories()
-        return TransactionService(wallet_repo, transaction_repo, notification_service)
+        service = TransactionService(wallet_repo, transaction_repo, notification_service)
+        return service

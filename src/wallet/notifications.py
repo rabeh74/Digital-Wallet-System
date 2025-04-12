@@ -2,7 +2,8 @@ from .tasks import send_transaction_notification as send_notification_task
 import os
 from django.urls import reverse
 from rest_framework_simplejwt.tokens import RefreshToken
-# get user_model
+
+
 class NotificationService:
     """Service for sending notifications"""
     def send_transaction_notification(self, email, transaction, message_type):
@@ -24,6 +25,7 @@ class NotificationService:
             'accept_url' : process_action_url,
             'reject_url' : process_action_url,
             'token' : token,
+            'expiry_time' : transaction.expiry_time ,
         }
         send_notification_task.delay(email, payload)
     

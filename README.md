@@ -43,6 +43,7 @@ The Digital Wallet System is designed to handle financial operations efficiently
 - Caching: Redis-backed caching for optimized performance.
 - Database: PostgreSQL for reliable, transactional data storage.
 - Comprehensive Testing: Extensive unit and integration tests Django’s test framework.
+- Logging: Detailed logging for wallet and Celery operations in 'log-feature' branch.
 
 ### Security Features
 - JWT Authentication: Token-based access control for API endpoints.

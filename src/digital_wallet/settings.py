@@ -228,3 +228,77 @@ CACHE_TIMEOUT = 60 * 15
 # IP whitelist
 IP_WHITELIST = ['127.0.0.1', '0.0.0.0' , '172.17.0.1', '172.17.0.2']
 
+# settings.py
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{asctime} {levelname} {module}.{funcName} {message} | user_id={user_id} wallet_id={wallet_id} transaction_ref={transaction_ref} amount={amount}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{asctime} {levelname} {message}',
+            'style': '{',
+        },
+    },
+    'filters': {
+        'add_context': {
+            '()': 'wallet.utils.ContextFilter',  # Custom filter defined later
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+            'level': 'DEBUG' if DEBUG else 'INFO',
+        },
+        'file_wallet': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs/wallet.log'),
+            'maxBytes': 1024 * 1024 * 5,  # 5 MB
+            'backupCount': 10,
+            'formatter': 'verbose',
+            'level': 'DEBUG',
+            'filters': ['add_context'],
+        },
+        'file_celery': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs/celery.log'),
+            'maxBytes': 1024 * 1024 * 5,
+            'backupCount': 10,
+            'formatter': 'verbose',
+            'level': 'DEBUG',
+            'filters': ['add_context'],
+        },
+    },
+    'loggers': {
+        'wallet.service': {
+            'handlers': ['console', 'file_wallet'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+        'wallet.views': {
+            'handlers': ['console', 'file_wallet'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+        'wallet.tasks': {
+            'handlers': ['console', 'file_celery'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+        'wallet.utils': {
+            'handlers': ['console', 'file_wallet'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+os.makedirs(os.path.join(BASE_DIR, 'logs'), exist_ok=True)

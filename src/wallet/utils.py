@@ -1,10 +1,11 @@
 from django.core.cache import cache
 from rest_framework.exceptions import ValidationError
-import logging
 from rest_framework.response import Response
 from rest_framework import status
+from threading import local
+import logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('wallet.utils')
 
 class IdempotencyChecker:
     """Utility to enforce idempotency using a client-provided Idempotency-Key header."""
@@ -101,3 +102,20 @@ class IdempotencyMixin:
         response = process_func(request, *args, **kwargs)
         IdempotencyChecker.mark_processed(idempotency_key, response.data)
         return response
+
+_thread_locals = local()
+
+class ContextFilter(logging.Filter):
+    def filter(self, record):
+        record.user_id = getattr(_thread_locals, 'user_id', 'N/A')
+        record.transaction_ref = getattr(_thread_locals, 'transaction_ref', 'N/A')
+        record.wallet_id = getattr(_thread_locals, 'wallet_id', 'N/A')
+        record.amount = getattr(_thread_locals, 'amount', 'N/A')
+        return True
+
+def set_logging_context(user_id=None, transaction_ref=None, wallet_id=None , amount=None):
+    """Set context for the current thread."""
+    _thread_locals.user_id = user_id
+    _thread_locals.transaction_ref = transaction_ref
+    _thread_locals.wallet_id = wallet_id
+    _thread_locals.amount = amount
