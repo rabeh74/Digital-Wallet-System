@@ -217,9 +217,10 @@ class DepositStrategy(TransactionStrategy):
             Transaction: Created transaction object.
 
         """
+        reference = f"DEPOSIT-{uuid.uuid4().hex[:8]}"
         with db_transaction.atomic():
             self.wallet_repository.update_balance(kwargs['wallet'], kwargs['amount'])
-            transaction = self._create_transaction(kwargs['wallet'], kwargs['amount'], kwargs['funding_source'], kwargs['reference'])
+            transaction = self._create_transaction(kwargs['wallet'], kwargs['amount'], kwargs['funding_source'], reference)
         self.notification_service.send_transaction_notification(kwargs['wallet'].user.email, transaction, 'deposit')
         return transaction
 
@@ -272,9 +273,10 @@ class WithdrawalStrategy(TransactionStrategy):
         Returns:
             Transaction: Created transaction object.
         """
+        reference = f"WITHDRAWAL-{uuid.uuid4().hex[:8]}"
         with db_transaction.atomic():
             self.wallet_repository.update_balance(kwargs['wallet'], -kwargs['amount'])
-            transaction = self._create_transaction(kwargs['wallet'], kwargs['amount'], kwargs['funding_source'], kwargs['reference'])
+            transaction = self._create_transaction(kwargs['wallet'], kwargs['amount'], kwargs['funding_source'], reference)
         self.notification_service.send_transaction_notification(kwargs['wallet'].user.email, transaction, 'withdrawal')
         return transaction
 
@@ -327,7 +329,7 @@ class TransferStrategy(TransactionStrategy):
         Returns:
             str: Transaction reference.
         """
-        reference = kwargs.get('reference') or f"TRANSFER-{uuid.uuid4().hex[:8]}"
+        reference = f"TRANSFER-{uuid.uuid4().hex[:8]}"
         with db_transaction.atomic():
             sender_transaction = self._process_sender_transaction(kwargs['wallet'], kwargs['recipient_wallet'], kwargs['amount'], reference)
             recipient_transaction = self._process_recipient_transaction(kwargs['wallet'], kwargs['recipient_wallet'], kwargs['amount'], reference)
@@ -352,7 +354,7 @@ class TransferStrategy(TransactionStrategy):
             wallet=wallet,
             related_wallet=recipient_wallet,
             amount=amount,
-            transaction_type=Transaction.TransactionTypes.DEBIT,
+            transaction_type=Transaction.TransactionTypes.TRANSFER_OUT,
             funding_source=Transaction.FundingSource.INTERNAL,
             status=Transaction.Status.PENDING,
             reference=reference
@@ -375,7 +377,7 @@ class TransferStrategy(TransactionStrategy):
             wallet=recipient_wallet,
             related_wallet=wallet,
             amount=amount,
-            transaction_type=Transaction.TransactionTypes.CREDIT,
+            transaction_type=Transaction.TransactionTypes.TRANSFER_IN,
             funding_source=Transaction.FundingSource.INTERNAL,
             status=Transaction.Status.PENDING,
             reference=reference

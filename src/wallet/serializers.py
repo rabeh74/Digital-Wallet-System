@@ -49,7 +49,6 @@ class TransferSerializer(serializers.Serializer):
     """Serializer for transfer transaction data with validation."""
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
     recipient_username = serializers.CharField(max_length=150)
-    reference = serializers.CharField(max_length=100, required=False)
 
     def validate(self, data):
         """Validate transfer-specific conditions."""
@@ -115,12 +114,12 @@ class TransactionActionSerializer(serializers.Serializer):
         # Fetch sender and recipient transactions
         sender_tx = Transaction.objects.filter(
             reference=reference,
-            transaction_type=Transaction.TransactionTypes.DEBIT,
+            transaction_type=Transaction.TransactionTypes.TRANSFER_OUT,
             status=Transaction.Status.PENDING
         ).first()
         recipient_tx = Transaction.objects.filter(
             reference=reference,
-            transaction_type=Transaction.TransactionTypes.CREDIT,
+            transaction_type=Transaction.TransactionTypes.TRANSFER_IN,
             status=Transaction.Status.PENDING
         ).first()
 

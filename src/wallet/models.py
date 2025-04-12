@@ -32,8 +32,8 @@ class Transaction(models.Model):
     class TransactionTypes(models.TextChoices):
         DEPOSIT = 'DEP', 'Deposit'
         WITHDRAWAL = 'WTH', 'Withdrawal'
-        CREDIT = 'CREDIT', 'Credit'
-        DEBIT = 'DEBIT', 'Debit'
+        TRANSFER_IN = 'TIN', 'Transfer In'
+        TRANSFER_OUT = 'TOUT', 'Transfer Out'
     
     class FundingSource(models.TextChoices):
         PAYSEND = 'PAYSEND', 'Paysend'

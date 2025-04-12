@@ -118,8 +118,8 @@ class WalletTransferTests(APITestCase):
         self.assertEqual(self.sender_wallet.balance, Decimal('50.00'))
         self.assertEqual(self.recipient_wallet.balance, Decimal('0.00'))
 
-        sender_transaction = Transaction.objects.get(reference=reference, transaction_type=Transaction.TransactionTypes.DEBIT)
-        recipient_transaction = Transaction.objects.get(reference=reference, transaction_type=Transaction.TransactionTypes.CREDIT)
+        sender_transaction = Transaction.objects.get(reference=reference, transaction_type=Transaction.TransactionTypes.TRANSFER_OUT)
+        recipient_transaction = Transaction.objects.get(reference=reference, transaction_type=Transaction.TransactionTypes.TRANSFER_IN)
         self.assertEqual(sender_transaction.status, Transaction.Status.PENDING)
         self.assertEqual(recipient_transaction.status, Transaction.Status.PENDING)
 
@@ -153,8 +153,8 @@ class WalletTransferTests(APITestCase):
         self.sender_wallet.refresh_from_db()
         self.assertEqual(self.sender_wallet.balance, Decimal('50.00'))
 
-        sender_transaction = Transaction.objects.get(reference=reference, transaction_type=Transaction.TransactionTypes.DEBIT)
-        recipient_transaction = Transaction.objects.get(reference=reference, transaction_type=Transaction.TransactionTypes.CREDIT)
+        sender_transaction = Transaction.objects.get(reference=reference, transaction_type=Transaction.TransactionTypes.TRANSFER_OUT)
+        recipient_transaction = Transaction.objects.get(reference=reference, transaction_type=Transaction.TransactionTypes.TRANSFER_IN)
 
         self.client.force_authenticate(user=self.recipient)
         response = self.client.post(self.transaction_action_url, {

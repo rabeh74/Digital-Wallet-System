@@ -119,11 +119,10 @@ class WalletViewSet(BaseServiceViewSet):
 
         recipient_username = serializer.validated_data['recipient_username']
         amount = Decimal(serializer.validated_data['amount'])
-        reference = serializer.validated_data.get('reference')
 
         sender_user = request.user
         recipient_user = self._get_recipient_user(recipient_username)
-        reference = self._process_transfer(sender_user, recipient_user, amount, reference)
+        reference = self._process_transfer(sender_user, recipient_user, amount)
         return Response(
             {'message': 'Transfer initiated successfully', 'reference': reference},
             status=status.HTTP_200_OK
@@ -194,7 +193,7 @@ class WalletViewSet(BaseServiceViewSet):
         except User.DoesNotExist:
             raise CustomValidationError(f"User with username {username} does not exist")
 
-    def _process_transfer(self, sender, recipient, amount, reference):
+    def _process_transfer(self, sender, recipient, amount):
         """
         Process the transfer using the wallet service.
 
@@ -216,7 +215,6 @@ class WalletViewSet(BaseServiceViewSet):
                 wallet=sender.wallet,
                 recipient_wallet=recipient.wallet,
                 amount=amount,
-                reference=reference
             )
         except Wallet.DoesNotExist:
             raise CustomValidationError("Wallet not found")
@@ -331,8 +329,8 @@ class TransactionViewSet(BaseServiceViewSet):
         action = serializer.validated_data['action']
         reference = serializer.validated_data['reference']
 
-        sender_tx = self._get_transaction(reference, Transaction.TransactionTypes.DEBIT)
-        recipient_tx = self._get_transaction(reference, Transaction.TransactionTypes.CREDIT)
+        sender_tx = self._get_transaction(reference, Transaction.TransactionTypes.TRANSFER_OUT)
+        recipient_tx = self._get_transaction(reference, Transaction.TransactionTypes.TRANSFER_IN)
         message = 'Transaction accepted' if action == 'accept' else 'Transaction rejected'
         self.transaction_service.execute(
             action=action,
@@ -348,7 +346,7 @@ class TransactionViewSet(BaseServiceViewSet):
 
         Args:
             reference: Transaction reference string.
-            transaction_type: Type of transaction (e.g., DEBIT, CREDIT).
+            transaction_type: Type of transaction (e.g., TRANSFER_OUT, TRANSFER_IN).
 
         Returns:
             Transaction: Matching transaction object.
@@ -431,7 +429,7 @@ class TransactionViewSet(BaseServiceViewSet):
                 examples=[
                     OpenApiExample(
                         'Transaction type',
-                        value='DEBIT'
+                        value='TOUT'
                     )
                 ]
             ),
